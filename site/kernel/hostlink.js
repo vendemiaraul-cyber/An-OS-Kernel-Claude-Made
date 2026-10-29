@@ -14,6 +14,9 @@
   const WEBLLM_URL = "https://esm.run/@mlc-ai/web-llm@0.2.86";
   const TFJS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0";
   const OLLAMA_URL = "http://localhost:11434";
+  // Offline preview (preview/preview-data.js): no internet, so only
+  // SmartestChild and a built-in city list with SAMPLE weather.
+  const PREVIEW = window.CONMON_PREVIEW || null;
   // Transformers.js models (ONNX, 4-bit): [Hugging Face id, label, approx. download MB]
   const TFJS_MODELS = [
     ["onnx-community/LFM2.5-350M-ONNX", "LFM2.5 350M (tiny, fast)", 260],
@@ -198,6 +201,16 @@
 
   async function installLlm() {
     setBusy("installing llm");
+    if (PREVIEW) {
+      progress(100, "SmartestChild ready");
+      sendText("M", "Engines:\n  SmartestChild    built in, ready\n" +
+        "This preview has no internet, so Transformers.js, WebLLM and Ollama are\n" +
+        "switched off here. All four work on your Netlify site.");
+      state.llm = true;
+      setBusy("");
+      send("D", "llm");
+      return;
+    }
     progress(10, "Starting SmartestChild");
     if (!window.SmartestChild) throw new Error("SmartestChild is missing from this page.");
     progress(40, "Looking for a WebGPU graphics card");
@@ -267,6 +280,10 @@
     groups.push({ engine: "SmartestChild - built-in retro chatbot, instant", models: [
       { id: "smartest:child", label: "SmartestChild", size: "built in", status: "ready" },
     ] });
+    if (PREVIEW) {
+      notes.push("Preview: only SmartestChild runs here. The other engines need internet.");
+      return finishList(groups);
+    }
 
     const tf = [];
     for (const [model, label, mb] of TFJS_MODELS) {
@@ -302,6 +319,10 @@
       notes.push(...ollamaHelp());
     }
 
+    return finishList(groups);
+  }
+
+  function finishList(groups) {
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const lines = [];
     lastModels = [];
@@ -815,7 +836,8 @@
     fill(scr, 0, 0x1F);
     put(scr, 0, 1, "solMeteo", 0x1E);
     put(scr, 0, 11, text, 0x1F);
-    put(scr, 0, 68, "Open-Meteo", 0x1B);
+    if (PREVIEW) put(scr, 0, 63, "SAMPLE WEATHER", 0x1E);
+    else put(scr, 0, 68, "Open-Meteo", 0x1B);
   }
 
   function fmtLat(v) { return Math.abs(v).toFixed(2) + "°" + (v >= 0 ? "N" : "S"); }
@@ -843,7 +865,7 @@
     const temp = `${Math.round(cur.temperature_2m * 10) / 10}°C`;
     put(scr, PANEL + 1, 12, temp, 0x0F);
     put(scr, PANEL + 1, 12 + temp.length + 2, desc, 0x0E);
-    const localTime = String(cur.time || "").slice(11, 16);
+    const localTime = String(cur.time || "").slice(11, 16);   // place's local clock
     put(scr, PANEL + 1, 50, `Local time ${localTime}`, 0x07);
     const wind = `${Math.round(cur.wind_speed_10m)} km/h ${COMPASS[Math.round(((cur.wind_direction_10m || 0) % 360) / 45) % 8]}`;
     put(scr, PANEL + 2, 12, `Feels like ${Math.round(cur.apparent_temperature)}°C   Humidity ${cur.relative_humidity_2m}%   Wind ${wind}`, 0x07);
@@ -860,10 +882,12 @@
       const pp = d.precipitation_probability_max && d.precipitation_probability_max[i];
       if (pp != null) put(scr, row, 47, `rain chance ${pp}%`, pp >= 50 ? 0x09 : 0x08);
     }
-    put(scr, ROWS - 1, 2, "Weather data: Open-Meteo.com (CC BY 4.0) · Places: GeoNames", 0x08);
+    if (wx.sample) put(scr, ROWS - 1, 2, "SAMPLE weather: no internet in this preview. Live data on your site.", 0x0E);
+    else put(scr, ROWS - 1, 2, "Weather data: Open-Meteo.com (CC BY 4.0) · Places: GeoNames", 0x08);
   }
 
   async function geocode(name) {
+    if (PREVIEW) return PREVIEW.geocode(name);
     const url = `${GEO_API}?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
     let res;
     try { res = await fetch(url, { signal: AbortSignal.timeout(10000) }); } catch (_) {
@@ -877,6 +901,7 @@
   }
 
   async function forecast(p) {
+    if (PREVIEW) return PREVIEW.forecast(p);
     const q = new URLSearchParams({
       latitude: p.lat, longitude: p.lon, timezone: "auto", forecast_days: "3",
       current: "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",

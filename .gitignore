@@ -4,3 +4,4 @@ node_modules/
 os/build/
 os/conmon.iso
 .DS_Store
+preview/out/
