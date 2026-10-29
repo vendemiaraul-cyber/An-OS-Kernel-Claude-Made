@@ -2,7 +2,8 @@
 //
 //   install            list packages
 //   install mp4        MP4 player + sample videos      -> adds `play`
-//   install llm        chat with a language model      -> adds `models`, `load`
+//   install llm        chat with an AI model           -> adds `models`, `load`
+//                      engines: SmartestChild, Transformers.js, WebLLM, Ollama
 //
 // ConMon can't decode video or run a neural network itself, so packages work
 // through the host link (kernel/hostlink.c): ConMon Lab, the browser page
@@ -18,7 +19,8 @@ bool mp4_installed, llm_installed;
 struct Model {
     char   letter;
     String id, size, label;
-    bool   cached;
+    String status;                      // "downloaded", "ready", "on your PC" or empty
+    String engine;                      // section heading, e.g. "Ollama - on your PC"
 };
 Vector<Model> models;
 String ready_id, ready_label;           // model downloaded and loaded this session
@@ -35,8 +37,10 @@ bool wait_packet(hl_packet &p, uint32_t timeout_ms, bool *cancelled = nullptr) {
     for (;;) {
         if (hostlink_poll(&p)) return true;
         if (cancelled) {
-            int k = keyboard_poll();
-            if (k == 3 || k == 27) { *cancelled = true; return false; }
+            // Only take Ctrl+C / Esc; anything else stays queued so text typed
+            // while an answer streams in isn't lost.
+            int k = keyboard_peek();
+            if (k == 3 || k == 27) { keyboard_poll(); *cancelled = true; return false; }
         }
         if (timeout_ms && now_ms() - start > timeout_ms) return false;
         cpu_halt();
@@ -177,7 +181,8 @@ void list_packages() {
     print("Packages (delivered by ConMon Lab):\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     kprintf("  mp4   MP4 video player + 4 sample videos          %s\n", mp4_installed ? "[installed]" : "");
-    kprintf("  llm   Talk to an AI model (WebLLM, on your GPU)    %s\n", llm_installed ? "[installed]" : "");
+    kprintf("  llm   AI chat: SmartestChild, Transformers.js, WebLLM, Ollama %s\n",
+            llm_installed ? "[installed]" : "");
     print("Usage: install <name>    e.g. install mp4\n");
 }
 
@@ -186,13 +191,13 @@ bool pick_model(Shell &sh) {
     hl_packet p;
     for (;;) {
         bool cancelled;
-        if (!wait_packet(p, 20000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
+        if (!wait_packet(p, 60000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
         if (p.type == 'M') { kprintf("%s\n", reinterpret_cast<const char *>(p.data)); continue; }
         if (p.type == 'E') { error("%s", reinterpret_cast<const char *>(p.data)); return false; }
         if (p.type == 'L') break;
     }
 
-    // One model per line: "A|model-id|879 MB|Llama 3.2 1B|cached"
+    // One model per line: "A|engine:model-id|879 MB|Llama 3.2 1B|status|Engine heading"
     models.clear();
     const char *d = reinterpret_cast<const char *>(p.data);
     while (*d) {
@@ -201,7 +206,8 @@ bool pick_model(Shell &sh) {
         m.id     = field(d, 1);
         m.size   = field(d, 2);
         m.label  = field(d, 3);
-        m.cached = field(d, 4) == "cached";
+        m.status = field(d, 4);
+        m.engine = field(d, 5);
         models.push_back(kstd::move(m));
         while (*d && *d != '\n') d++;
         if (*d == '\n') d++;
@@ -210,23 +216,31 @@ bool pick_model(Shell &sh) {
 
     {
         Color c(VGA_YELLOW);
-        print("\nModels that can run on this device:\n");
+        print("\nAI models that can run here:\n");
     }
+    const char *heading = "";
     for (const auto &m : models) {
-        Color c(m.cached ? VGA_LIGHT_GREEN : VGA_LIGHT_GREY);
-        kprintf("  %c  %-30s %9s  %s\n", m.letter, m.label.c_str(), m.size.c_str(),
-                m.cached ? "downloaded" : "");
+        if (m.engine != heading) {                  // new engine section
+            heading = m.engine.c_str();
+            Color c(VGA_LIGHT_CYAN);
+            kprintf(" %s\n", heading);
+        }
+        Color c(m.status.empty() ? VGA_LIGHT_GREY : VGA_LIGHT_GREEN);
+        kprintf("   %c  %-30s %9s  %s\n", m.letter, m.label.c_str(), m.size.c_str(), m.status.c_str());
     }
     print("\n");
 
-    String choice = sh.editor().read("Type a letter to download (Enter to skip): ", false, 2);
+    String choice = sh.editor().read("Type a letter to choose (Enter to skip): ", false, 2);
     if (choice.empty()) { print("No model chosen. Type models to see the list again.\n"); return false; }
     char want = choice[0];
     if (want >= 'a' && want <= 'z') want = (char)(want - 32);
     for (const auto &m : models) {
         if (m.letter != want) continue;
-        kprintf("Downloading %s (%s). This runs once; it's cached in your browser.\n",
-                m.label.c_str(), m.size.c_str());
+        if (m.status.empty())
+            kprintf("Downloading %s (%s). This runs once; it's cached in your browser.\n",
+                    m.label.c_str(), m.size.c_str());
+        else
+            kprintf("Getting %s ready...\n", m.label.c_str());
         if (!host_job(sh, "llm.download", m.id.c_str())) return false;
         ready_id = m.id;
         ready_label = m.label;

@@ -35,6 +35,10 @@ int keyboard_poll(void) {           /* never -1: the shell would execute hlt */
     if (!test_keys || !*test_keys) longjmp(test_done, 1);
     return (unsigned char)*test_keys++;
 }
+int keyboard_peek(void) {
+    if (!test_keys || !*test_keys) longjmp(test_done, 1);
+    return (unsigned char)*test_keys;
+}
 int serial_read(void) { return -1; }
 void cpu_halt(void) {}
 int serial_available(void) { return 0; }

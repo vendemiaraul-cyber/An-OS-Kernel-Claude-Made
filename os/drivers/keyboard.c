@@ -79,6 +79,10 @@ int keyboard_poll(void) {
     return c;
 }
 
+int keyboard_peek(void) {
+    return head == tail ? -1 : buf[tail];
+}
+
 int keyboard_getchar(void) {
     int c;
     while ((c = keyboard_poll()) < 0) cpu_halt();

@@ -177,7 +177,7 @@
     ui.pkgLlm.textContent = st.llm ? "installed" : "not installed";
     ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
     ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
-    ui.pkgModel.textContent = st.model ? st.model.replace(/-MLC$/, "") : "no model loaded";
+    ui.pkgModel.textContent = st.model ? "model: " + (st.modelLabel || st.model.replace(/-MLC$/, "")) : "no model loaded";
     ui.pkgBusy.textContent = st.busy ? "host: " + st.busy + "…" : "";
     ui.sendMp4.disabled = !st.mp4;
   });

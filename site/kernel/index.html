@@ -148,7 +148,13 @@
           <button class="btn" id="send-mp4" disabled style="width:100%">Send an MP4 to ConMon…</button>
           <input type="file" id="mp4-file" accept="video/mp4,video/*" hidden>
           <div class="pkg-row"><span class="mono">llm</span><span class="pill" id="pkg-llm">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install llm</span>, pick a model by its letter, then <span class="mono">load</span> to chat. Runs on your GPU with WebLLM; models are 0.4-3.5 GB and cached after the first download.</div>
+          <div class="muted small">Type <span class="mono">install llm</span>, pick a model by its letter, then <span class="mono">load</span> to chat. Four engines:</div>
+          <ul class="tips small" style="margin:0">
+            <li><b>SmartestChild</b>: built-in retro chatbot, instant on any device.</li>
+            <li><b>Transformers.js</b>: small models (~0.3-0.6 GB) in this tab, on the GPU or CPU.</li>
+            <li><b>WebLLM</b>: bigger models (0.4-3.5 GB) on your GPU, needs WebGPU.</li>
+            <li><b>Ollama</b>: models on your own PC. Set <span class="mono">OLLAMA_ORIGINS</span> to this site's address so the page may reach it.</li>
+          </ul>
           <div class="file-info"><span id="pkg-gpu">WebGPU: checking…</span> · <span id="pkg-model">no model loaded</span></div>
           <div class="file-info" id="pkg-busy" style="color:var(--accent)"></div>
         </div>
@@ -210,6 +216,7 @@
   <footer class="wrap footer">ConMon Lab · <a href="/">home</a></footer>
 
   <script src="/v86/libv86.js"></script>
+  <script src="/kernel/smartestchild.js"></script>
   <script src="/kernel/hostlink.js"></script>
   <script src="/kernel/kernel.js"></script>
 </body>

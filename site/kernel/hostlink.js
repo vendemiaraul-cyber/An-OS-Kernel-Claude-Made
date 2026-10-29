@@ -2,8 +2,8 @@
 //
 // ConMon talks to this page over its serial port (COM1). This file is the
 // "host" side: it installs packages, decodes MP4 video into VGA text-mode
-// frames, and runs language models with WebLLM on the GPU, then streams the
-// results back into the OS.
+// frames, and runs language models (SmartestChild, Transformers.js, WebLLM or
+// Ollama), then streams the results back into the OS.
 //
 //   ConMon -> host:  ESC ] "CM;" <type> ";" <payload> BEL
 //   host -> ConMon:  STX <type> <len lo> <len hi> <payload bytes>
@@ -11,6 +11,15 @@
   "use strict";
 
   const WEBLLM_URL = "https://esm.run/@mlc-ai/web-llm@0.2.86";
+  const TFJS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0";
+  const OLLAMA_URL = "http://localhost:11434";
+  // Transformers.js models (ONNX, 4-bit): [Hugging Face id, label, approx. download MB]
+  const TFJS_MODELS = [
+    ["onnx-community/LFM2.5-350M-ONNX", "LFM2.5 350M (tiny, fast)", 260],
+    ["HuggingFaceTB/SmolLM2-360M-Instruct", "SmolLM2 360M", 270],
+    ["onnx-community/Qwen2.5-0.5B-Instruct", "Qwen2.5 0.5B", 400],
+    ["onnx-community/Qwen3-0.6B-ONNX", "Qwen3 0.6B (best answers)", 570],
+  ];
   const VIDEOS = {
     ep1: { file: "/videos/ConMon-1-booting-up.mp4", title: "Episode 1: Booting up", name: "ep1.mp4" },
     ep2: { file: "/videos/ConMon-2-the-shell.mp4", title: "Episode 2: The shell", name: "ep2.mp4" },
@@ -115,8 +124,8 @@
         case "llm.models": await listModels(); break;
         case "llm.download": case "llm.load": await loadModel(arg); break;
         case "llm.chat": await chat(arg); break;
-        case "llm.stop": if (engine) engine.interruptGenerate(); break;
-        case "llm.reset": history = []; break;
+        case "llm.stop": stopGeneration(); break;
+        case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
         case "mp4.play": await playVideo(arg); break;
         case "mp4.ack": player.acked = true; break;
         case "mp4.stop": stopVideo(); break;
@@ -315,12 +324,22 @@
   }
 
   // ---------------------------------------------------------------- llm
+  //
+  // Four engines, all behind the same ConMon commands (models / load):
+  //   smartest  SmartestChild, a built-in rule-based chatbot (instant, any device)
+  //   tfjs      Transformers.js: ONNX models in this tab, WebGPU or WebAssembly
+  //   webllm    WebLLM: MLC models on WebGPU (fastest in the browser)
+  //   ollama    Ollama: models running on the user's own PC (localhost:11434)
+  // Model ids sent to ConMon are "<engine>:<model>".
 
   let webllm = null, engine = null, history = [];
+  let tfjs = null, tfjsPipe = null, tfjsModel = "", tfjsStopper = null;
+  let ollamaAbort = null, smartestStop = false;
+  const smartestMemory = {};
   let adapterInfo = null;
 
   async function gpuAdapter() {
-    if (!("gpu" in navigator)) return null;
+    if (!("gpu" in navigator) || !navigator.gpu) return null;
     try { return await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }); } catch (_) { return null; }
   }
 
@@ -331,37 +350,62 @@
     return a;
   }
 
+  function engineOf(id) {
+    const i = String(id).indexOf(":");
+    return i < 0 ? { name: "webllm", model: id } : { name: id.slice(0, i), model: id.slice(i + 1) };
+  }
+
+  function mbText(mb) { return mb >= 1000 ? (mb / 1000).toFixed(1) + " GB" : Math.round(mb) + " MB"; }
+
+  async function ollamaTags(timeoutMs) {
+    const res = await fetch(OLLAMA_URL + "/api/tags", { signal: AbortSignal.timeout(timeoutMs || 1500) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    return (data.models || []).filter((m) => !/embed/i.test(m.name));
+  }
+
+  function ollamaHelp() {
+    return [
+      "Ollama: not reachable at localhost:11434. To use models on your PC:",
+      "  1. Install Ollama from ollama.com and run: ollama pull llama3.2",
+      `  2. Allow this page: set OLLAMA_ORIGINS=${location.origin}`,
+      "     and restart Ollama. Then type models again.",
+    ];
+  }
+
   async function installLlm() {
     setBusy("installing llm");
-    progress(5, "Looking for a WebGPU graphics card");
+    progress(10, "Starting SmartestChild");
+    if (!window.SmartestChild) throw new Error("SmartestChild is missing from this page.");
+    progress(40, "Looking for a WebGPU graphics card");
     const adapter = await checkGpu();
-    if (!adapter) {
-      sendText("E", "WebGPU isn't available here. Use Chrome or Edge on a computer (or Chrome on a recent Android).");
-      setBusy("");
-      return;
-    }
-    adapterInfo = adapter.info || {};
-    progress(35, "Downloading the WebLLM runtime");
-    if (!webllm) webllm = await import(WEBLLM_URL);
-    progress(100, "WebLLM runtime ready");
-    const gpuName = [adapterInfo.vendor, adapterInfo.architecture].filter(Boolean).join(" ") || "WebGPU device";
-    sendText("M", `GPU: ${gpuName}   half precision (f16): ${adapter.features.has("shader-f16") ? "yes" : "no"}`);
+    adapterInfo = adapter ? adapter.info || {} : null;
+    progress(70, "Looking for Ollama on this PC");
+    let ollama = null;
+    try { ollama = await ollamaTags(1200); } catch (_) { ollama = null; }
+    progress(100, "Engines checked");
+    const gpuName = adapter ? ([adapterInfo.vendor, adapterInfo.architecture].filter(Boolean).join(" ") || "WebGPU device") : "";
+    const lines = [
+      "Engines:",
+      "  SmartestChild    built in, ready",
+      "  Transformers.js  " + (adapter ? `in this tab on your GPU (${gpuName})` : "in this tab on the CPU (WebAssembly, slower)"),
+      "  WebLLM           " + (adapter ? `in this tab on your GPU, half precision: ${adapter.features.has("shader-f16") ? "yes" : "no"}` : "needs WebGPU (Chrome or Edge), not available here"),
+      "  Ollama           " + (ollama ? `found on this PC with ${ollama.length} model${ollama.length === 1 ? "" : "s"}` : "not running on this PC (optional)"),
+    ];
+    sendText("M", lines.join("\n"));
     state.llm = true;
     setBusy("");
     send("D", "llm");
   }
 
-  async function workingModels() {
-    const adapter = await gpuAdapter();
-    if (!adapter) throw new Error("WebGPU isn't available in this browser.");
+  async function webllmModels(adapter) {
     if (!webllm) webllm = await import(WEBLLM_URL);
     const f16 = adapter.features.has("shader-f16");
     const maxStorage = adapter.limits.maxStorageBufferBindingSize || 0;
     const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
     const mem = navigator.deviceMemory || 8;
     const budgetMB = mobile ? 1500 : mem <= 4 ? 2600 : 4500;
-    const list = webllm.prebuiltAppConfig.model_list;
-    const byId = new Map(list.map((m) => [m.model_id, m]));
+    const byId = new Map(webllm.prebuiltAppConfig.model_list.map((m) => [m.model_id, m]));
     const out = [];
     for (const [family, label] of FAMILIES) {
       const ids = f16 ? [`${family}-q4f16_1-MLC`, `${family}-q4f32_1-MLC`] : [`${family}-q4f32_1-MLC`];
@@ -376,71 +420,247 @@
         if (m.buffer_size_required_bytes && maxStorage && m.buffer_size_required_bytes > maxStorage) continue;
         let cached = false;
         try { cached = await webllm.hasModelInCache(id); } catch (_) {}
-        out.push({ id, label, mb: Math.round(m.vram_required_MB || 0), cached });
+        out.push({ id: "webllm:" + id, label, size: mbText(m.vram_required_MB || 0), status: cached ? "downloaded" : "" });
         break;
       }
     }
     return out;
   }
 
+  async function tfjsCached(model) {
+    try {
+      const cache = await caches.open("transformers-cache");
+      const keys = await cache.keys();
+      return keys.some((r) => r.url.includes("/" + model + "/"));
+    } catch (_) { return false; }
+  }
+
   let lastModels = [];
   async function listModels() {
     setBusy("checking models");
-    const models = await workingModels();
-    lastModels = models;
-    const letters = "ABCDEFGHIJKL";
-    const lines = models.map((m, i) => `${letters[i]}|${m.id}|${m.mb >= 1000 ? (m.mb / 1000).toFixed(1) + " GB" : m.mb + " MB"}|${m.label}|${m.cached ? "cached" : ""}`);
+    const adapter = await gpuAdapter();
+    const groups = [];
+
+    groups.push({ engine: "SmartestChild - built-in retro chatbot, instant", models: [
+      { id: "smartest:child", label: "SmartestChild", size: "built in", status: "ready" },
+    ] });
+
+    const tf = [];
+    for (const [model, label, mb] of TFJS_MODELS) {
+      if (!adapter && mb > 450) continue;               // keep CPU-only devices to the small ones
+      tf.push({ id: "tfjs:" + model, label, size: "~" + mbText(mb), status: (await tfjsCached(model)) ? "downloaded" : "" });
+    }
+    groups.push({ engine: "Transformers.js - in this tab, " + (adapter ? "on your GPU" : "on the CPU (slower)"), models: tf });
+
+    if (adapter) {
+      try {
+        const w = await webllmModels(adapter);
+        if (w.length) groups.push({ engine: "WebLLM - in this tab on your GPU, fastest", models: w });
+      } catch (err) {
+        sendText("M", "WebLLM: couldn't load its model list (" + (err.message || err) + ").");
+      }
+    } else {
+      sendText("M", "WebLLM: needs WebGPU (Chrome or Edge on a computer), so it's hidden here.");
+    }
+
+    try {
+      const tags = await ollamaTags(1500);
+      if (tags.length) {
+        groups.push({ engine: "Ollama - on your PC (localhost:11434)", models: tags.map((t) => ({
+          id: "ollama:" + t.name,
+          label: t.name.replace(/:latest$/, "") + (t.details && t.details.parameter_size ? " " + t.details.parameter_size : ""),
+          size: mbText((t.size || 0) / 1e6),
+          status: "on your PC",
+        })) });
+      } else {
+        sendText("M", "Ollama: running, but no models yet. On your PC run: ollama pull llama3.2");
+      }
+    } catch (_) {
+      sendText("M", ollamaHelp().join("\n"));
+    }
+
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lines = [];
+    lastModels = [];
+    for (const g of groups) {
+      for (const m of g.models) {
+        if (lines.length >= letters.length) break;
+        lines.push(`${letters[lines.length]}|${m.id}|${m.size}|${m.label}|${m.status}|${g.engine}`);
+        lastModels.push(m);
+      }
+    }
     setBusy("");
-    if (!lines.length) sendText("E", "None of the WebLLM models fit this device's GPU.");
-    else sendText("L", lines.join("\n"));
+    sendText("L", lines.join("\n"));
+  }
+
+  function labelFor(id) {
+    const m = lastModels.find((x) => x.id === id);
+    return m ? m.label : engineOf(id).model;
   }
 
   async function loadModel(id) {
-    if (!webllm) webllm = await import(WEBLLM_URL);
-    if (engine && state.model === id) { send("D", ""); return; }
-    setBusy("loading " + id);
-    const report = (r) => {
-      const text = (r.text || "").replace(/\s+/g, " ");
-      const m = /(\d+)MB/i.exec(text);
-      progress((r.progress || 0) * 100, /Fetching|Loading model from cache/i.test(text) ? (m ? `Downloading ${m[1]} MB` : "Downloading") : "Loading onto the GPU");
-    };
-    if (!engine) engine = new webllm.MLCEngine({ initProgressCallback: report });
-    else engine.setInitProgressCallback(report);
-    await engine.reload(id);
+    const { name, model } = engineOf(id);
+    if (state.model === id && (name !== "webllm" || engine) && (name !== "tfjs" || tfjsPipe)) { send("D", ""); return; }
+    setBusy("loading " + labelFor(id));
+
+    if (name === "smartest") {
+      progress(100, "SmartestChild is built in");
+    } else if (name === "ollama") {
+      progress(30, "Asking Ollama on your PC");
+      let tags;
+      try { tags = await ollamaTags(2500); } catch (_) { throw new Error("Ollama isn't reachable at localhost:11434. Is it running, with OLLAMA_ORIGINS set?"); }
+      if (!tags.some((t) => t.name === model)) throw new Error(`Ollama doesn't have ${model}. On your PC run: ollama pull ${model}`);
+      progress(100, "Ollama is ready");
+    } else if (name === "tfjs") {
+      if (!tfjs) { progress(2, "Downloading Transformers.js"); tfjs = await import(TFJS_URL); }
+      const adapter = await gpuAdapter();
+      const device = adapter ? "webgpu" : "wasm";
+      const dtype = adapter && adapter.features.has("shader-f16") ? "q4f16" : "q4";
+      const files = {};
+      const report = (p) => {
+        if (p.status === "progress" && p.file) {
+          files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
+          const all = Object.values(files);
+          const total = all.reduce((s, f) => s + f.total, 0), loaded = all.reduce((s, f) => s + f.loaded, 0);
+          progress(total ? (loaded / total) * 95 : 5, `Downloading ${Math.round(total / 1e6)} MB`);
+        } else if (p.status === "ready") progress(97, device === "webgpu" ? "Loading onto the GPU" : "Loading into memory");
+      };
+      if (tfjsPipe && tfjsPipe.dispose) { try { await tfjsPipe.dispose(); } catch (_) {} }
+      tfjsPipe = null;
+      tfjsPipe = await tfjs.pipeline("text-generation", model, { device, dtype, progress_callback: report });
+      tfjsModel = model;
+    } else if (name === "webllm") {
+      if (!webllm) webllm = await import(WEBLLM_URL);
+      const report = (r) => {
+        const text = (r.text || "").replace(/\s+/g, " ");
+        const m = /(\d+)MB/i.exec(text);
+        progress((r.progress || 0) * 100, /Fetching|Loading model from cache/i.test(text) ? (m ? `Downloading ${m[1]} MB` : "Downloading") : "Loading onto the GPU");
+      };
+      if (!engine) engine = new webllm.MLCEngine({ initProgressCallback: report });
+      else engine.setInitProgressCallback(report);
+      await engine.reload(model);
+    } else {
+      throw new Error("Unknown engine " + name);
+    }
     state.model = id;
+    state.modelLabel = labelFor(id);
     history = [];
     setBusy("");
     send("D", "");
   }
 
+  // Streams text to ConMon in small batches and hides <think>...</think>.
+  function makeStreamer() {
+    let pending = "", lastSend = 0, inThink = false, reply = "";
+    const flush = () => { if (pending) { sendText("T", pending); pending = ""; } lastSend = performance.now(); };
+    return {
+      push(piece) {
+        let s = piece, visible = "";
+        while (s) {
+          if (inThink) {
+            const e = s.indexOf("</think>");
+            if (e < 0) s = ""; else { s = s.slice(e + 8); inThink = false; }
+          } else {
+            const b = s.indexOf("<think>");
+            if (b < 0) { visible += s; s = ""; } else { visible += s.slice(0, b); s = s.slice(b + 7); inThink = true; }
+          }
+        }
+        if (!reply) visible = visible.replace(/^\s+/, "");
+        if (!visible) return;
+        reply += visible; pending += visible;
+        if (performance.now() - lastSend > 60) flush();
+      },
+      done() { flush(); return reply; },
+    };
+  }
+
+  function stopGeneration() {
+    smartestStop = true;
+    if (engine && engineOf(state.model || "").name === "webllm") engine.interruptGenerate();
+    if (tfjsStopper) tfjsStopper.interrupt();
+    if (ollamaAbort) ollamaAbort.abort();
+  }
+
   async function chat(text) {
-    if (!engine || !state.model) { sendText("E", "No model is loaded. Type models to pick one."); return; }
+    if (!state.model) { sendText("E", "No model is loaded. Type models to pick one."); return; }
+    const { name, model } = engineOf(state.model);
     history.push({ role: "user", content: text });
     if (history.length > 16) history = history.slice(-16);
+    const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
     setBusy("thinking");
-    const request = {
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 512,
-    };
-    if (/^Qwen3/i.test(state.model)) request.extra_body = { enable_thinking: false };
-    let reply = "", pending = "", lastSend = 0, inThink = false;
-    const flush = () => { if (pending) { sendText("T", pending); pending = ""; } lastSend = performance.now(); };
-    const stream = await engine.chat.completions.create(request);
-    for await (const chunk of stream) {
-      let piece = (chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content) || "";
-      // Hide any <think>...</think> reasoning some models emit.
-      if (piece.includes("<think>")) { inThink = true; piece = piece.split("<think>")[0]; }
-      if (inThink) {
-        if (!piece.includes("</think>")) continue;
-        inThink = false; piece = piece.split("</think>").pop();
+    const out = makeStreamer();
+
+    if (name === "smartest") {
+      smartestStop = false;
+      const answer = window.SmartestChild.reply(text, smartestMemory);
+      await new Promise((r) => setTimeout(r, 250));               // "is typing..."
+      for (let i = 0; i < answer.length && !smartestStop; i += 3) {
+        out.push(answer.slice(i, i + 3));
+        await new Promise((r) => setTimeout(r, 18));
       }
-      reply += piece;
-      pending += piece;
-      if (performance.now() - lastSend > 60) flush();
+    } else if (name === "tfjs") {
+      if (!tfjsPipe || tfjsModel !== model) throw new Error("The model isn't loaded. Type load to load it again.");
+      tfjsStopper = tfjs.InterruptableStoppingCriteria ? new tfjs.InterruptableStoppingCriteria() : null;
+      const streamer = new tfjs.TextStreamer(tfjsPipe.tokenizer, {
+        skip_prompt: true, skip_special_tokens: true, callback_function: (t) => out.push(t),
+      });
+      // Qwen3 thinks out loud by default; /no_think asks it to answer directly.
+      const msgs = /qwen3/i.test(model)
+        ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, content: m.content + " /no_think" } : m))
+        : messages;
+      const opts = { max_new_tokens: 384, do_sample: false, streamer };
+      if (tfjsStopper) opts.stopping_criteria = tfjsStopper;
+      await tfjsPipe(msgs, opts);
+      tfjsStopper = null;
+    } else if (name === "webllm") {
+      const request = { messages, stream: true, temperature: 0.7, max_tokens: 512 };
+      if (/^Qwen3/i.test(model)) request.extra_body = { enable_thinking: false };
+      const stream = await engine.chat.completions.create(request);
+      for await (const chunk of stream) {
+        out.push((chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content) || "");
+      }
+    } else if (name === "ollama") {
+      ollamaAbort = new AbortController();
+      let res;
+      try {
+        res = await fetch(OLLAMA_URL + "/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model, messages, stream: true, think: false }),
+          signal: ollamaAbort.signal,
+        });
+      } catch (err) {
+        ollamaAbort = null;
+        if (err.name === "AbortError") { out.done(); history.pop(); setBusy(""); send("X", ""); return; }
+        throw new Error("Lost contact with Ollama at localhost:11434.");
+      }
+      if (!res.ok) { ollamaAbort = null; throw new Error(`Ollama answered ${res.status}: ${(await res.text()).slice(0, 100)}`); }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            const msg = JSON.parse(line);
+            if (msg.error) throw new Error("Ollama: " + msg.error);
+            if (msg.message && msg.message.content) out.push(msg.message.content);
+          }
+        }
+      } catch (err) {
+        if (err.name !== "AbortError") throw err;
+      } finally {
+        ollamaAbort = null;
+      }
     }
-    flush();
+
+    const reply = out.done();
     history.push({ role: "assistant", content: reply });
     setBusy("");
     send("X", "");
@@ -455,6 +675,7 @@
       mode = 0; frame = "";
       stopVideo(true);
       state.mp4 = false; state.llm = false;   // a fresh ConMon has nothing installed
+      state.model = null; state.modelLabel = "";
       history = [];
       onState(state);
     },
@@ -464,7 +685,8 @@
     checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
     get state() { return state; },
-    // test hook: lets automated tests swap in a fake WebLLM module
+    // test hooks: let automated tests swap in fake engines
     _setWebLLM(mod) { webllm = mod; },
+    _setTransformers(mod) { tfjs = mod; },
   };
 })();

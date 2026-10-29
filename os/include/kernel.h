@@ -125,6 +125,7 @@ void     speaker_beep(uint32_t freq, uint32_t ms);
 void keyboard_init(void);
 int  keyboard_getchar(void);            /* blocks until a key is pressed */
 int  keyboard_poll(void);               /* -1 if no key waiting */
+int  keyboard_peek(void);               /* like poll, but leaves the key queued */
 
 /* ---------- kernel heap (mm/kheap.c) ---------- */
 void   kheap_init(uintptr_t start, size_t size);
