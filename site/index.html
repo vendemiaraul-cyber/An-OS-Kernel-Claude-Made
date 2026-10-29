@@ -18,7 +18,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ConMon Lab</title>
-  <meta name="description" content="ConMon, a tiny x86 OS in C and C++, running in your browser, plus a YouTube Data API test app.">
+  <meta name="description" content="ConMon, a tiny x86 OS in C and C++, running in your browser, plus a YouTube Data API test app and the Sigeon OS Music player.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
@@ -38,6 +38,8 @@
     .app .go { font-family: var(--mono); font-size: 13px; color: var(--accent); }
     .icon.kernel { background: rgba(74,222,128,.12); color: var(--accent); font: 700 18px var(--mono); }
     .icon.yt { background: var(--yt); }
+    .icon.music { background: linear-gradient(135deg, #a8205a, #f0629b); }
+    .icon.music img { width: 34px; height: auto; }
     .icon.yt::after { content: ""; border-left: 13px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent; margin-left: 4px; }
     .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 28px; }
     .fact { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -52,6 +54,7 @@
       <nav class="nav">
         <a href="/kernel/">Kernel Lab</a>
         <a href="/youtube/">YouTube Test</a>
+        <a href="/music/">Sigeon Music</a>
       </nav>
     </div>
   </header>
@@ -84,6 +87,12 @@
         <h2>YouTube Test</h2>
         <p>Search YouTube, browse what's trending, read video stats and play results, through the YouTube Data API v3 with a request log for testing.</p>
         <span class="go">open youtube test →</span>
+      </a>
+      <a class="app" href="/music/">
+        <div class="icon music"><img src="/music/icon-192.png" alt="" style="border-radius:8px"></div>
+        <h2>Sigeon OS Music</h2>
+        <p>A Spotify-style player that keeps your songs in the browser: playlists, Liked Songs, a queue and cover art. Search and stream YouTube through the same server key.</p>
+        <span class="go">open sigeon music →</span>
       </a>
     </section>
 

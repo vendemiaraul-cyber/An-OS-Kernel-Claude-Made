@@ -26,6 +26,14 @@ A Netlify site with two apps:
   SectorLISP on the main screen. You can drop in your own bzImage too. MikeOS has a `DOOM.BAS` program at the top
   of its menu: it can't run DOOM itself (it's 16-bit), so it asks the page,
   over the serial port, to open DOOM in a window.
+- **Sigeon OS Music** (`/music/`): a Spotify-style music player. Add MP3, M4A,
+  FLAC, WAV or OGG files and they are stored in the browser (IndexedDB) with
+  their tags and cover art, so they play offline. Playlists, Liked Songs,
+  albums and artists, a queue with play next / shuffle / repeat, lock-screen
+  controls, and a full-screen player with a visualiser. It searches and streams
+  YouTube through the same `/api/youtube` function as YouTube Test (or the key
+  pasted there). Three demo songs are synthesised in the browser on first run.
+  Installable as an app (manifest + offline service worker).
 - **YouTube Test** (`/youtube/`): search, trending, video stats and an embedded
   player through the **YouTube Data API v3**, with a request log for testing.
   The API key stays on the server inside a Netlify Function.
@@ -35,6 +43,7 @@ site/                      static site Netlify publishes
   index.html               landing page
   kernel/                  Kernel Lab (index.html + kernel.js)
   youtube/                 YouTube Test (index.html + youtube.js)
+  music/                   Sigeon OS Music (one self-contained index.html, manifest, sw.js, icons)
   kernel/hostlink.js       host side of ConMon's packages (llm, solMeteo, doom, doomy)
   kernel/smartestchild.js  the built-in SmartestChild chatbot
   kernels/                 bundled images: conmon.bin, hello-floppy.img
@@ -248,3 +257,12 @@ code with a Download button.
 - Transformers.js by Hugging Face, Apache-2.0, loaded from jsDelivr at runtime.
 - Haiku advancement: Claude Haiku 5.5 by Anthropic, through your own API key.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.
+
+## Sigeon OS Music
+
+The source is `tools/music/app.html` (page, styles and script in one file) plus
+the pigeon logo; `python3 tools/music/build.py` writes `site/music/`. Songs,
+playlists and likes live in the browser's IndexedDB on each device, so nothing
+is uploaded. "Ask the browser to keep my music" in Settings asks for persistent
+storage so the browser won't clear it when space runs low. YouTube tracks play
+in the official embedded player, which stays visible while a video plays.
