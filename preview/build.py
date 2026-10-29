@@ -19,7 +19,6 @@ FILES = {
     "meteo/countries.geo.json": "meteo/countries.geo.json", "meteo/cities.json": "meteo/cities.json",
     "kernel/smartestchild.js": "kernel/smartestchild.js", "kernel/hostlink.js": "kernel/hostlink.js",
     "doom/doom.wasm": "doom/doom.wasm", "doom/LICENSE-GPL-2.0.txt": "doom/LICENSE-GPL-2.0.txt", "doom/SOURCE.txt": "doom/SOURCE.txt",
-    "doomy/doomy.py.txt": "doomy/doomy.py",
 }
 for _f in os.listdir(os.path.join(SITE, "guests")):
     if _f.endswith(".txt"):
@@ -94,7 +93,8 @@ def main():
     head_styles = "".join(re.findall(r"<style>.*?</style>", head, re.S))
     fonts = "\n".join(l.strip() for l in head.splitlines() if "fonts.g" in l)
 
-    body = body.replace('href="/guests/', 'href="guests/').replace('href="/doomy/doomy.py" download', 'href="doomy/doomy.py.txt" download="doomy.py"')
+    body = body.replace('href="/guests/', 'href="guests/')
+    body = body.replace('<a href="/doomy/doomy.py" download>download doomy.py</a>', 'take <span class="mono">site/doomy/doomy.py</span> from the project zip')
     body = re.sub(r'<nav class="nav">.*?</nav>', '<span class="badge" style="margin-left:auto"><span class="led"></span>preview</span>', body, flags=re.S)
     body = body.replace('<a class="brand" href="/">', '<span class="brand">').replace('ConMon<span class="full">&nbsp;Lab</span></a>', 'ConMon<span class="full">&nbsp;Lab</span></span>')
     body = re.sub(r'<footer class="wrap footer">.*?</footer>', '<footer class="wrap footer">ConMon Lab preview. The full site, with the YouTube Test app, lives on your Netlify deploy.</footer>', body, flags=re.S)
