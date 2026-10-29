@@ -1,0 +1,3 @@
+#!/bin/sh
+# Asks ConMon Lab (the page around this PC) to open DOOM in a window.
+printf '\033]CM;window.doom\007' > /dev/ttyS0

@@ -1,0 +1,231 @@
+diff --git a/src/demos/nanox/Makefile b/src/demos/nanox/Makefile
+index 747a0e5..25e7502 100644
+--- a/src/demos/nanox/Makefile
++++ b/src/demos/nanox/Makefile
+@@ -109,7 +109,7 @@ ifneq ($(ARCH),CYGWIN)
+     ifneq ($(ARCH),ANDROID)
+       ifneq ($(ARCH),AQUILA)
+         TARGETS += $(MW_DIR_BIN)/nxterm
+-        TARGETS += $(MW_DIR_BIN)/tmterm
++#        TARGETS += $(MW_DIR_BIN)/tmterm
+       endif
+     endif
+   endif
+diff --git a/src/demos/nanox/nxstart.c b/src/demos/nanox/nxstart.c
+index deb010d..6e19ab9 100644
+--- a/src/demos/nanox/nxstart.c
++++ b/src/demos/nanox/nxstart.c
+@@ -66,29 +66,19 @@ struct app_info {
+ 	char		app_id[12];
+ 	char		app_path[32];
+ } Apps[] = {
+-	{"clock",   PATH "nxclock"},
+-	{"term",    PATH "nxterm"},
+-	{"tetris",  PATH "nxtetris"},
+-	{"world",   PATH "nxworld"},
+-	{"landmine",PATH "nxmine"},
+-#if ELKS
+-	{"calculator",PATH "nxcalc"},
+-#else
+-	{"aafont",    PATH "demo-aafont"},
+-	{"agg",       PATH "demo-agg"},
++	/* ConMon Lab desktop menu */
++	{"terminal",  PATH "nxterm"},
+ 	{"calculator",PATH "demo-nuklear-calculator"},
++	{"clock",     PATH "nxclock"},
++	{"tetris",    PATH "nxtetris"},
++	{"landmine",  PATH "nxmine"},
+ 	{"chess",     PATH "nxchess"},
+-	{"composite", PATH "demo-composite"},
+-	{"eyes",      PATH "nxeyes"},
++	{"world",     PATH "nxworld"},
++	{"scribble",  PATH "nxscribble"},
+ 	{"keyboard",  PATH "nxkbd"},
+ 	{"magnifier", PATH "nxmag"},
+-	{"nuklear",   PATH "demo-nuklear-node_editor"},
+-	{"nuklear2",  PATH "demo-nuklear-overview"},
+-	{"roaches",   PATH "nxroach"},
+-	{"scribble",  PATH "nxscribble"},
+-	{"slider",    PATH "nxslider"},
+-#endif
+-	{"quit",      "quit"},
++	{"widgets",   PATH "demo-nuklear-overview"},
++	{"DOOM",      PATH "doom"},
+ 	{"", ""}
+ };
+ 
+diff --git a/src/drivers/Objects.rules b/src/drivers/Objects.rules
+index 60badea..245495f 100644
+--- a/src/drivers/Objects.rules
++++ b/src/drivers/Objects.rules
+@@ -185,6 +185,10 @@ MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_ser.o
+ endif
+ 
+ # Linux /dev/input/mice driver
++ifeq ($(MOUSE), EVDEVMOUSE)
++MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_evdev.o
++endif
++
+ ifeq ($(MOUSE), DEVMICEMOUSE)
+ MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_devmice.o
+ endif
+diff --git a/src/drivers/kbd_ttyscan.c b/src/drivers/kbd_ttyscan.c
+index 814d868..b9eabb0 100644
+--- a/src/drivers/kbd_ttyscan.c
++++ b/src/drivers/kbd_ttyscan.c
+@@ -16,6 +16,7 @@
+ #include <linux/kd.h>
+ #include <linux/vt.h>
+ #include "device.h"
++#include <linux/input.h>
+ #include "fb.h"
+ 
+ #if UCLINUX
+@@ -40,7 +41,8 @@ KBDDEVICE kbddev = {
+ #define RELEASED	0
+ #define PRESSED		1
+ 
+-static	int		fd;		/* file descriptor for keyboard */
++static	int		fd;		/* file descriptor for keyboard (the tty) */
++static	int		evfd = -1;	/* evdev keyboard: ConMon Lab reads keys here */
+ static	struct termios	old;		/* original terminal modes */
+ static  int 		old_kbd_mode;
+ static unsigned char 	key_state[MWKEY_LAST];	/* FIXME - make sparse array */
+@@ -113,6 +115,25 @@ TTY_Open(KBDDEVICE *pkd)
+ 		return DRIVER_FAIL;
+ 	}
+ 
++	/* ConMon Lab: read key presses from evdev and switch the tty's own
++	 * keyboard handling off, so no key goes anywhere else. */
++	{
++		char path[32];
++		for (int n = 0; n < 16 && evfd < 0; n++) {
++			unsigned long ev[1] = { 0 }, keys[(KEY_MAX + 1) / (8 * sizeof(long)) + 1] = { 0 };
++			snprintf(path, sizeof path, "/dev/input/event%d", n);
++			int f = open(path, O_RDONLY | O_NONBLOCK);
++			if (f < 0) continue;
++			ioctl(f, EVIOCGBIT(0, sizeof ev), ev);
++			ioctl(f, EVIOCGBIT(EV_KEY, sizeof keys), keys);
++			if ((ev[0] & (1UL << EV_KEY)) && (keys[KEY_A / (8 * sizeof(long))] & (1UL << (KEY_A % (8 * sizeof(long))))))
++				evfd = f;
++			else
++				close(f);
++		}
++		if (evfd >= 0) ioctl(fd, KDSKBMODE, K_OFF);
++	}
++
+ 	/* Load OS keymappings*/
+ 	LoadKernelKeymaps(fd);
+ 
+@@ -134,7 +155,7 @@ TTY_Open(KBDDEVICE *pkd)
+ 	}
+ 	UpdateLEDState(key_modstate);
+ 
+-	return fd;
++	return evfd >= 0 ? evfd : fd;
+ 
+ err:
+ 	close(fd);
+@@ -196,7 +217,18 @@ TTY_Read(MWKEY *kbuf, MWKEYMOD *modifiers, MWSCANCODE *pscancode)
+ 	MWKEY	mwkey;
+ 	unsigned char buf[128];
+ 
+-	cc = read(fd, buf, 1);
++	if (evfd >= 0) {
++		struct input_event e;
++		cc = 0;
++		while (read(evfd, &e, sizeof e) == sizeof e) {
++			if (e.type == EV_KEY && e.code < 128) {
++				buf[0] = (unsigned char)(e.code | (e.value == 0 ? 0x80 : 0));
++				cc = 1;
++				break;
++			}
++		}
++	} else
++		cc = read(fd, buf, 1);
+ 	if (cc > 0) {
+ 		pressed = (*buf & 0x80) ? RELEASED: PRESSED;
+ 		scancode = *buf & 0x7f;
+diff --git a/src/drivers/mou_evdev.c b/src/drivers/mou_evdev.c
+new file mode 100644
+index 0000000..67c1b5a
+--- /dev/null
++++ b/src/drivers/mou_evdev.c
+@@ -0,0 +1,77 @@
++/*
++ * Linux evdev mouse driver for Nano-X (added by ConMon Lab).
++ * Prefers an absolute pointer (VMware vmmouse, tablets) so the cursor sits
++ * exactly under the host's mouse or finger; falls back to a relative mouse.
++ */
++#include <stdio.h>
++#include <errno.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <linux/input.h>
++#include "device.h"
++
++static int fd = -1, absolute, ax, ay, rx, ry, buttons, minx, maxx = 65535, miny, maxy = 65535;
++
++#define TEST_BIT(bits, n) ((bits)[(n) / (8 * sizeof(long))] & (1UL << ((n) % (8 * sizeof(long)))))
++
++static int Ev_Open(MOUSEDEVICE *pmd) {
++	char path[32];
++	int rel_fd = -1;
++	for (int i = 0; i < 16; i++) {
++		unsigned long ev[1] = { 0 }, abs[1] = { 0 };
++		snprintf(path, sizeof path, "/dev/input/event%d", i);
++		int f = open(path, O_RDONLY | O_NONBLOCK);
++		if (f < 0) continue;
++		ioctl(f, EVIOCGBIT(0, sizeof ev), ev);
++		if (TEST_BIT(ev, EV_ABS)) {
++			ioctl(f, EVIOCGBIT(EV_ABS, sizeof abs), abs);
++			if (TEST_BIT(abs, ABS_X) && TEST_BIT(abs, ABS_Y)) {
++				struct input_absinfo ix, iy;
++				if (!ioctl(f, EVIOCGABS(ABS_X), &ix)) { minx = ix.minimum; maxx = ix.maximum; }
++				if (!ioctl(f, EVIOCGABS(ABS_Y), &iy)) { miny = iy.minimum; maxy = iy.maximum; }
++				if (rel_fd >= 0) close(rel_fd);
++				fd = f; absolute = 1;
++				return fd;
++			}
++		}
++		if (TEST_BIT(ev, EV_REL) && rel_fd < 0) { rel_fd = f; continue; }
++		close(f);
++	}
++	if (rel_fd < 0) return MOUSE_FAIL;
++	fd = rel_fd; absolute = 0;
++	return fd;
++}
++
++static void Ev_Close(void) { if (fd >= 0) close(fd); fd = -1; }
++static int Ev_GetButtonInfo(void) { return MWBUTTON_L | MWBUTTON_M | MWBUTTON_R | MWBUTTON_SCROLLUP | MWBUTTON_SCROLLDN; }
++static void Ev_GetDefaultAccel(int *pscale, int *pthresh) { *pscale = absolute ? 1 : 2; *pthresh = absolute ? 1000 : 5; }
++
++static int Ev_Read(MWCOORD *px, MWCOORD *py, MWCOORD *pz, int *pb) {
++	struct input_event e;
++	int wheel = 0;
++	while (read(fd, &e, sizeof e) == sizeof e) {
++		if (e.type == EV_ABS && e.code == ABS_X) ax = e.value;
++		else if (e.type == EV_ABS && e.code == ABS_Y) ay = e.value;
++		else if (e.type == EV_REL && e.code == REL_X) rx += e.value;
++		else if (e.type == EV_REL && e.code == REL_Y) ry += e.value;
++		else if (e.type == EV_REL && e.code == REL_WHEEL) wheel = e.value;
++		else if (e.type == EV_KEY) {
++			int b = e.code == BTN_LEFT ? MWBUTTON_L : e.code == BTN_RIGHT ? MWBUTTON_R : e.code == BTN_MIDDLE ? MWBUTTON_M : 0;
++			if (e.value) buttons |= b; else buttons &= ~b;
++		} else if (e.type == EV_SYN && e.code == SYN_REPORT) {
++			*pz = 0;
++			*pb = buttons | (wheel > 0 ? MWBUTTON_SCROLLUP : wheel < 0 ? MWBUTTON_SCROLLDN : 0);
++			if (absolute) {
++				*px = (MWCOORD)((long long)(ax - minx) * (scrdev.xres - 1) / (maxx - minx ? maxx - minx : 1));
++				*py = (MWCOORD)((long long)(ay - miny) * (scrdev.yres - 1) / (maxy - miny ? maxy - miny : 1));
++				return MOUSE_ABSPOS;
++			}
++			*px = rx; *py = ry; rx = ry = 0;
++			return MOUSE_RELPOS;
++		}
++	}
++	return MOUSE_NODATA;
++}
++
++MOUSEDEVICE mousedev = { Ev_Open, Ev_Close, Ev_GetButtonInfo, Ev_GetDefaultAccel, Ev_Read, NULL, MOUSE_NORMAL };

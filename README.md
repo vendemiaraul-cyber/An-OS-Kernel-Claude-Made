@@ -15,8 +15,11 @@ A Netlify site with two apps:
   `native doom`: DOOM compiled for ConMon and run by ConMon's own CPU at
   320×200 in 256 colours, as a ConMon *extension* (see `ext/`). The page does the work and streams
   the results into ConMon over its serial port.
-  The **Bundled kernels** list also boots a real **Linux 6.6** kernel with a
-  BusyBox shell (one 1.5 MB bzImage), MikeOS, Tetros, bootBASIC, bootOS and
+  The **Bundled kernels** list also boots **Linux Desktop**: Linux 6.6 with
+  the Nano-X (Microwindows) windowing desktop, its window manager and apps
+  (terminal, calculator, clock, Tetris, landmine, chess, world map, DOOM),
+  with a mouse that follows your pointer or finger (2.5 MB). There is also
+  a text-only **Linux 6.6 (shell)** with BusyBox (1.5 MB), MikeOS, Tetros, bootBASIC, bootOS and
   SectorLISP on the main screen. You can drop in your own bzImage too. MikeOS has a `DOOM.BAS` program at the top
   of its menu: it can't run DOOM itself (it's 16-bit), so it asks the page,
   over the serial port, to open DOOM in a window.
@@ -42,7 +45,8 @@ netlify/functions/
 os/                        ConMon source (C, C++, NASM) - see os/README.md
 ext/                       ConMon extensions: a small libc and DOOM (make -> site/doom/ndoom.cmx)
 tools/                     doom.bas (MikeOS DOOM launcher), fat12_add.py,
-                           linux/ (configs, root files and build.sh for linux.bzimage)
+                           linux/ (configs, root files and build.sh for linux.bzimage),
+                           linux/desktop/ (the same for linux-desktop.bzimage)
 preview/                   builds the offline preview (python3 preview/build.py)
 netlify.toml
 ```
@@ -111,7 +115,11 @@ sh tools/linux/build.sh     # clones Linux 6.6, BusyBox 1.36.1 and musl 1.2.5 fr
 ```
 
 It needs gcc with `-m32`, make, flex, bison, bc, perl, xz and git, takes a
-few minutes, and writes `site/guests/linux.bzimage`. Inside the Linux shell,
+few minutes, and writes `site/guests/linux.bzimage`. Then
+`sh tools/linux/desktop/build.sh` builds `linux-desktop.bzimage`: it adds
+Nano-X from github.com/ghaerr/microwindows with a small patch
+(`nanox-conmon.patch`: evdev mouse and keyboard input, the desktop menu) and
+a kernel with the bochs DRM framebuffer and the VMware absolute mouse. Inside the Linux shell,
 `doom` sends the same serial message as MikeOS's DOOM.BAS and the page opens
 DOOM in a window.
 
@@ -144,7 +152,10 @@ size and GPU features fit the device.
   for non-commercial use); place search based on GeoNames.
 - Cities: Natural Earth populated places, public domain (`site/meteo/LICENSE-natural-earth.txt`).
 - Linux kernel (GPL-2.0), BusyBox (GPL-2.0) and musl (MIT) in
-  `site/guests/linux.bzimage`; sources and build recipe in `tools/linux/`.
+  `site/guests/linux.bzimage` and `linux-desktop.bzimage`; sources and build
+  recipes in `tools/linux/`.
+- Nano-X / Microwindows by Greg Haerr and contributors (MPL-1.1, or GPL-2.0),
+  in `linux-desktop.bzimage` (`site/guests/LICENSE-nanox.txt`).
 - Bundled systems: MikeOS (BSD-3-Clause), Tetros (MIT), bootBASIC and bootOS
   by Oscar Toledo G. (BSD-2-Clause), SectorLISP (ISC). See `site/guests/`.
   The MikeOS floppy adds DOOM.BAS (`tools/doom.bas`).

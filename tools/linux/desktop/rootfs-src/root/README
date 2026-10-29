@@ -1,0 +1,6 @@
+Linux 6.6 with the Nano-X (Microwindows) desktop.
+
+The Start list (top right) opens programs: clock, term, tetris, world,
+landmine, calculator, chess, eyes, keyboard, magnifier, roaches...
+"term" is a shell. Drag windows by their title bar; x closes them.
+In a terminal, `doom` opens DOOM in a window over this PC.

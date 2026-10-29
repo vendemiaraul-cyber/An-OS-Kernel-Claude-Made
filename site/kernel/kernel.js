@@ -21,6 +21,8 @@
   // Bundled systems. All permissively licensed; see /guests/SOURCES.txt.
   const SAMPLES = {
     conmon: { name: "conmon.bin", url: "/kernels/conmon.bin", label: "ConMon" },
+    desktop: { name: "linux-desktop.bzimage", url: "/guests/linux-desktop.bzimage", label: "Linux Desktop",
+      hint: "Linux Desktop (Nano-X): tap or click a program in the menu at the top right. Drag windows by their title bar; x closes them. DOOM is in the menu too." },
     linux: { name: "linux.bzimage", url: "/guests/linux.bzimage", label: "Linux 6.6",
       hint: "Linux 6.6 with BusyBox: a real shell. Try ls /, uname -a, top (q quits), vi notes.txt, or doom to open DOOM in a window." },
     mikeos: { name: "mikeos.flp", url: "/guests/mikeos.flp", label: "MikeOS 4.5",
@@ -177,6 +179,28 @@
     ui.fit.classList.toggle("focused", on);
   }
   ui.fit.addEventListener("pointerdown", () => ui.fit.focus({ preventScroll: true }));
+
+  // Taps on a graphical screen (the Linux desktop) become mouse clicks. v86
+  // turns finger movement into pointer motion, but a tap alone never clicks,
+  // so move the pointer to the finger first, then press until it lifts.
+  function tapToClick(e, down) {
+    if (!emulator || !emulator.bus) return;
+    const canvas = ui.screen.querySelector("canvas");
+    if (!canvas || canvas.style.display === "none") return;
+    const t = (e.changedTouches || [])[0];
+    if (!t) return;
+    const r = canvas.getBoundingClientRect();
+    if (t.clientX < r.left || t.clientX > r.right || t.clientY < r.top || t.clientY > r.bottom) return;
+    if (down) {
+      emulator.bus.send("mouse-absolute", [t.clientX - r.left, t.clientY - r.top, r.width, r.height]);
+      emulator.bus.send("mouse-delta", [0, 0]);
+      setTimeout(() => emulator && emulator.bus.send("mouse-click", [true, false, false]), 60);
+    } else {
+      setTimeout(() => emulator && emulator.bus.send("mouse-click", [false, false, false]), 120);
+    }
+  }
+  ui.fit.addEventListener("touchstart", (e) => tapToClick(e, true), { passive: true });
+  ui.fit.addEventListener("touchend", (e) => tapToClick(e, false), { passive: true });
   ui.fit.addEventListener("focus", () => setKeyboard(true));
   ui.fit.addEventListener("blur", () => setKeyboard(false));
 
@@ -465,6 +489,7 @@
         showOverlay("Failed to download " + (e && e.file_name ? e.file_name : "emulator files"), true);
       });
       host.attach(emu, serialByte);
+      window.__conmonLab = { emulator: emu };     // handy for tests and the browser console
       emu.add_listener("serial0-output-byte", (b) => host.onByte(b));
       emu.add_listener("emulator-started", () => {
         if (emulator !== emu) return;
