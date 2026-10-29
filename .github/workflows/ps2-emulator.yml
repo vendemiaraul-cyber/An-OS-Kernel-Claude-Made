@@ -1,0 +1,50 @@
+# Builds Play! (the open-source PS2 emulator, github.com/jpd002/Play-) for the
+# browser and commits Play.js + Play.wasm to site/ps2/emu/. It runs when
+# tools/ps2/PLAY_COMMIT (the Play! commit to build) changes.
+name: PS2 emulator (Play! for the browser)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["tools/ps2/PLAY_COMMIT", ".github/workflows/ps2-emulator.yml"]
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.repository == 'vendemiaraul-cyber/An-OS-Kernel-Claude-Made'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: emscripten-core/setup-emsdk@v14
+        with:
+          version: 4.0.1
+      - name: Get Play!
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq ninja-build
+          git init -q play && cd play
+          git remote add origin https://github.com/jpd002/Play-.git
+          git fetch -q --depth 1 origin "$(cat ../tools/ps2/PLAY_COMMIT)"
+          git checkout -q FETCH_HEAD
+          git submodule update --init --recursive --depth 1 -q
+      - name: Build (about 15 minutes)
+        run: |
+          cd play
+          set -o pipefail
+          (emcmake cmake --preset wasm-ninja && cmake --build --preset wasm-ninja-release) 2>&1 | tee ../build.log | tail -40
+      - name: Explain a failure
+        if: failure()
+        run: |
+          grep -iE "error|fatal" build.log | head -15 | while IFS= read -r l; do echo "::error::$l"; done
+          tail -15 build.log | while IFS= read -r l; do echo "::error::tail: $l"; done
+      - name: Commit the emulator
+        run: |
+          out=play/build_cmake/build/wasm-ninja/Source/ui_js/Release
+          ls -la $out
+          mkdir -p site/ps2/emu
+          cp $out/Play.js $out/Play.wasm site/ps2/emu/
+          cp play/License.txt site/ps2/emu/LICENSE-Play.txt 2>/dev/null || cp play/LICENSE* site/ps2/emu/ 2>/dev/null || true
+          echo "Play! $(cat tools/ps2/PLAY_COMMIT) built $(date -u +%F) by .github/workflows/ps2-emulator.yml" > site/ps2/emu/VERSION.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/ps2/emu
+          git commit -qm "PS2 emulator: Play! $(cut -c1-7 tools/ps2/PLAY_COMMIT) for the browser" || exit 0
+          for i in 1 2 3; do git pull -q --rebase && git push -q && break; sleep 5; done
