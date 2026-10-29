@@ -115,19 +115,30 @@ void draw_progress(int pct, const char *text) {
 enum JobResult { JOB_OK, JOB_ERROR, JOB_CANCELLED };
 
 // Sends a request and follows the host's progress until it finishes.
+// The host sends a keep-alive ('K') every 4 s while it works, so this much
+// silence means the page is gone or stuck.
+const uint32_t HOST_SILENCE_MS = 30000;
+
+void host_gone(bool showed_bar) {
+    if (showed_bar) kputc('\n');
+    error("ConMon Lab stopped answering. If the page froze, reload it; a smaller model may help.");
+    hostlink_reset();
+}
+
 JobResult host_job_ex(Shell &sh, const char *type, const char *payload, String *done = nullptr) {
     hostlink_send(type, payload);
     bool showed_bar = false, cancelled = false;
     hl_packet p;
     for (;;) {
-        if (!wait_packet(p, 0, &cancelled)) {
+        if (!wait_packet(p, HOST_SILENCE_MS, &cancelled)) {
             if (cancelled) {
                 hostlink_send("cancel", type);
                 if (showed_bar) kputc('\n');
                 error("Cancelled.");
                 return JOB_CANCELLED;
             }
-            continue;
+            host_gone(showed_bar);
+            return JOB_ERROR;
         }
         const char *d = reinterpret_cast<const char *>(p.data);
         switch (p.type) {
@@ -343,7 +354,7 @@ void install_all_models(Shell &sh) {
             Color c(VGA_WHITE);
             kprintf("[%u/%u] %c  %s (%s)\n", (uint32_t)(n + 1), (uint32_t)todo.size(), m.letter, m.label.c_str(), m.size.c_str());
         }
-        JobResult r = host_job_ex(sh, "llm.download", m.id.c_str());
+        JobResult r = host_job_ex(sh, "llm.fetch", m.id.c_str());   // download, then free memory
         if (r == JOB_CANCELLED) break;
         if (r == JOB_OK) { ok++; ready_id = m.id; ready_label = m.label; }
     }
@@ -380,12 +391,15 @@ void chat(Shell &sh) {
         Wrapper w(4);
         Color c(VGA_WHITE);
         hl_packet p;
-        bool stopped = false;
+        bool stopped = false, gone = false;
+        uint32_t stop_at = 0;
         for (;;) {
             bool cancelled;
-            if (!wait_packet(p, 0, &cancelled)) {
-                if (cancelled && !stopped) { hostlink_send("llm.stop", ""); stopped = true; }
-                continue;
+            if (!wait_packet(p, stopped ? 1000 : HOST_SILENCE_MS, &cancelled)) {
+                if (cancelled && !stopped) { hostlink_send("llm.stop", ""); stopped = true; stop_at = now_ms(); continue; }
+                if (stopped && now_ms() - stop_at < 6000) continue;
+                if (!stopped) gone = true;
+                break;                              // give up waiting for the rest
             }
             if (p.type == 'T') w.put(reinterpret_cast<const char *>(p.data));
             else if (p.type == 'X') break;
@@ -394,6 +408,7 @@ void chat(Shell &sh) {
         }
         w.flush();
         if (stopped) print(" [stopped]");
+        if (gone) { kputc('\n'); host_gone(false); }
         print("\n\n");
     }
 }

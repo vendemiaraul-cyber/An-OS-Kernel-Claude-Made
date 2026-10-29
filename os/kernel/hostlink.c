@@ -18,18 +18,28 @@ static uint8_t  pkt[HOSTLINK_MAX + 1];
 static int      state;                  /* 0 idle, 1 type, 2 len lo, 3 len hi, 4 payload */
 static uint8_t  pkt_type;
 static uint32_t pkt_len, pkt_pos;
+static uint32_t last_byte;              /* timer tick of the last byte received */
 
+/* Packet types are capital letters. Anything else means bytes went missing,
+ * so drop the half-read packet and wait for the next STX. The host never
+ * pauses in the middle of a packet, so a packet that stalls for over a
+ * second is dropped too: one lost byte must not swallow everything after it. */
 int hostlink_poll(struct hl_packet *out) {
     int c;
+    if (state != 0 && !serial_available() && timer_ticks() - last_byte > TIMER_HZ) state = 0;
     while ((c = serial_read()) >= 0) {
+        last_byte = timer_ticks();
         switch (state) {
         case 0: if (c == STX) state = 1; break;
-        case 1: pkt_type = (uint8_t)c; state = 2; break;
+        case 1:
+            if (c < 'A' || c > 'Z') { state = c == STX ? 1 : 0; break; }
+            pkt_type = (uint8_t)c; state = 2; break;
         case 2: pkt_len = (uint32_t)c; state = 3; break;
         case 3:
             pkt_len |= (uint32_t)c << 8;
             pkt_pos = 0;
             state = 4;
+            if (pkt_len > HOSTLINK_MAX) { state = 0; break; }     /* the host never sends more */
             if (pkt_len == 0) goto done;
             break;
         case 4:

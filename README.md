@@ -51,6 +51,31 @@ preview/                   builds the offline preview (python3 preview/build.py)
 netlify.toml
 ```
 
+## Run it on your PC (from the zip)
+
+Don't open the HTML files straight from the folder: browsers block the
+emulator, the AI models and downloads on `file://` pages (the page now says
+so instead of breaking). Use the launcher instead:
+
+- **Windows:** double-click `Start ConMon Lab (Windows).bat`. It starts a
+  small local web server (PowerShell, nothing to install) and opens
+  `http://localhost:8080/kernel/`. Keep its window open; close it to stop.
+- **Mac / Linux:** `sh start-mac-linux.sh` (needs python3).
+
+Everything except the YouTube app's server-side key works this way; on
+Ollama set `OLLAMA_ORIGINS=http://localhost:8080`.
+
+### If an AI model won't load
+
+- ConMon now gives up with a message instead of freezing when the page
+  stops answering, and Ctrl+C (or Esc) cancels a download that is stuck.
+- Only one model sits in memory at a time; `install llm all` downloads each
+  model and frees it before the next one.
+- "Not enough browser storage": each model is kept in the browser's cache.
+  Free disk space, or clear this site's data in the browser settings.
+- "The graphics card ran out of memory": reload the page and pick a smaller
+  model (the list already hides models too big for the device).
+
 ## Deploy on Netlify (from GitHub)
 
 1. Push this folder to a GitHub repository.

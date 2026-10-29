@@ -12,7 +12,7 @@
   "use strict";
 
   const WEBLLM_URL = "https://esm.run/@mlc-ai/web-llm@0.2.86";
-  const TFJS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0";
+  const TFJS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
   const OLLAMA_URL = "http://localhost:11434";
   // Offline preview (preview/preview-data.js): no internet, so only
   // SmartestChild and a built-in city list with SAMPLE weather.
@@ -44,6 +44,7 @@
     "You are a helpful assistant running inside ConMon, a tiny hobby operating system " +
     "shown on an 80-column text screen. Answer in plain text without markdown, " +
     "tables or emoji. Keep answers short unless asked for detail.";
+  const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
   let emu = null;
   let onState = () => {};
   let onWindow = null;
@@ -93,15 +94,57 @@
       .replace(/[^\n\x20-\x7E]/g, "");
   }
 
-  function progress(pct, text) { sendText("P", `${Math.max(0, Math.min(100, Math.round(pct)))}|${String(text).slice(0, 40)}`); }
+  // Progress reports are throttled: downloads can fire thousands of callbacks
+  // a second, and every packet has to squeeze through the emulated serial port.
+  let lastProgress = { at: 0, pct: -1, text: "" };
+  function progress(pct, text) {
+    pct = Math.max(0, Math.min(100, Math.round(pct)));
+    text = String(text).slice(0, 40);
+    const now = performance.now();
+    if (pct < 100 && text === lastProgress.text && (pct === lastProgress.pct || now - lastProgress.at < 250)) return;
+    lastProgress = { at: now, pct, text };
+    sendText("P", `${pct}|${text}`);
+  }
   function setBusy(text) { state.busy = text; onState(state); }
 
   // -------------------------------------------------------- dispatcher
 
-  async function handle(msg) {
+  // One job at a time for the AI engines: two models loading at once can run
+  // the GPU or the tab out of memory. A keep-alive packet ('K') goes out every
+  // few seconds while a job runs, so ConMon can tell a slow job from a dead page.
+  let llmQueue = Promise.resolve();
+  let jobDepth = 0, keepAlive = 0;
+  function jobStarted() { if (jobDepth++ === 0) keepAlive = setInterval(() => send("K", ""), 4000); }
+  function jobEnded() { if (jobDepth > 0 && --jobDepth === 0) clearInterval(keepAlive); }
+  const LLM_JOBS = new Set(["llm.models", "llm.download", "llm.load", "llm.fetch", "llm.chat", "llm.info"]);
+
+  // A job that never finishes (a stuck GPU, say) must not block the queue
+  // for good: after a cancel or an unhandled error, waiting jobs may start.
+  const gates = new Set();
+  function releaseQueue() {
+    for (const open of gates) open();
+    gates.clear();
+    jobDepth = 0;                       // an abandoned job no longer counts as alive
+    clearInterval(keepAlive);
+  }
+  function handle(msg) {
+    const i = msg.indexOf(";");
+    const type = i < 0 ? msg : msg.slice(0, i);
+    if (!LLM_JOBS.has(type)) return run(msg);
+    let open;
+    const gate = new Promise((r) => { open = r; });
+    gates.add(open);
+    const job = llmQueue.then(() => run(msg));
+    llmQueue = Promise.race([job.catch(() => {}), gate]).then(() => gates.delete(open));
+    return job;
+  }
+
+  async function run(msg) {
     const i = msg.indexOf(";");
     const type = i < 0 ? msg : msg.slice(0, i);
     const arg = i < 0 ? "" : msg.slice(i + 1);
+    const long = type !== "hello" && type !== "cancel" && !type.endsWith(".k") && type !== "game.ack" && type !== "llm.stop";
+    if (long) jobStarted();
     try {
       switch (type) {
         case "hello": sendText("H", "ConMon Lab 1"); break;
@@ -113,9 +156,14 @@
           else if (arg === "llm") await installLlm();
           else sendText("E", `Unknown package ${arg}`);
           break;
-        case "cancel": cancelled = true; break;
+        case "cancel":
+          cancelled = true;
+          setTimeout(() => releaseQueue(), 3000);
+          if (loading === "webllm" && engine) engine.unload().catch(() => {});
+          break;
         case "llm.models": await listModels(); break;
         case "llm.download": case "llm.load": await loadModel(arg); break;
+        case "llm.fetch": await loadModel(arg, { fetchOnly: true }); break;
         case "llm.chat": await chat(arg); break;
         case "llm.stop": stopGeneration(); break;
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
@@ -136,10 +184,32 @@
       }
     } catch (err) {
       console.error(err);
-      sendText("E", (err && err.message ? err.message : String(err)).slice(0, 160));
+      sendText("E", explain(err).slice(0, 160));
       setBusy("");
+    } finally {
+      if (long) jobEnded();
     }
   }
+
+  // Turns engine errors into something a person can act on.
+  function explain(err) {
+    const m = (err && err.message ? err.message : String(err)) || "Unknown error";
+    if (/\bquota\b|QuotaExceeded|no space left/i.test(m)) return "The browser ran out of storage for models. Free some space or delete a model, then try again.";
+    if (/device (was )?lost|GPUDeviceLostInfo|out of memory|\bOOM\b|failed to allocate|allocation failed/i.test(m)) return "The graphics card ran out of memory. Reload the page and pick a smaller model.";
+    if (/Failed to fetch|NetworkError|Load failed|net::ERR_/i.test(m)) return "A download failed. Check your internet connection and try again.";
+    if (/Cancelled/i.test(m)) return "Cancelled.";
+    return m;
+  }
+
+  // Errors nobody awaited (e.g. a GPU that gave up mid-load) still reach ConMon.
+  window.addEventListener("unhandledrejection", (e) => {
+    if (!emu || !state.busy) return;
+    e.preventDefault();                 // reported to ConMon below
+    console.error(e.reason);
+    sendText("E", explain(e.reason).slice(0, 160));
+    setBusy("");
+    releaseQueue();
+  });
 
   // ------------------------------------------------------------ downloads
 
@@ -252,9 +322,10 @@
     if (!webllm) webllm = await import(WEBLLM_URL);
     const f16 = adapter.features.has("shader-f16");
     const maxStorage = adapter.limits.maxStorageBufferBindingSize || 0;
-    const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
-    const mem = navigator.deviceMemory || 8;
-    const budgetMB = mobile ? 1500 : mem <= 4 ? 2600 : 4500;
+    const mobile = MOBILE;
+    const mem = navigator.deviceMemory || 8;          // browsers report at most 8
+    // Stay well under the machine's memory: the model, its cache and the page share it.
+    const budgetMB = mobile ? 1000 : mem <= 2 ? 900 : mem <= 4 ? 1800 : 3500;
     const byId = new Map(webllm.prebuiltAppConfig.model_list.map((m) => [m.model_id, m]));
     const out = [];
     for (const [family, label] of FAMILIES) {
@@ -364,10 +435,62 @@
     return m ? m.label : engineOf(id).model;
   }
 
-  async function loadModel(id) {
+  let loading = "";
+
+  async function freeEngines(keep) {
+    if (keep !== "webllm" && engine) { try { await engine.unload(); } catch (_) {} if (state.model && engineOf(state.model).name === "webllm") state.model = null; }
+    if (keep !== "tfjs" && tfjsPipe) { try { await tfjsPipe.dispose(); } catch (_) {} tfjsPipe = null; tfjsModel = ""; if (state.model && engineOf(state.model).name === "tfjs") state.model = null; }
+  }
+
+  // Free browser storage, in MB (null if the browser won't say).
+  async function freeStorageMB() {
+    try {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+      const e = await navigator.storage.estimate();
+      return e && e.quota ? (e.quota - (e.usage || 0)) / 1e6 : null;
+    } catch (_) { return null; }
+  }
+
+  async function loadModel(id, opts = {}) {
     const { name, model } = engineOf(id);
-    if (state.model === id && (name !== "webllm" || engine) && (name !== "tfjs" || tfjsPipe)) { send("D", ""); return; }
-    setBusy("loading " + labelFor(id));
+    if (!opts.fetchOnly && state.model === id && (name !== "webllm" || engine) && (name !== "tfjs" || tfjsPipe)) { send("D", ""); return; }
+    cancelled = false;
+    setBusy((opts.fetchOnly ? "downloading " : "loading ") + labelFor(id));
+    const listed = lastModels.find((x) => x.id === id);
+    if ((name === "tfjs" || name === "webllm") && listed && !listed.status) {
+      const free = await freeStorageMB(), needMB = parseFloat(String(listed.size).replace(/[^0-9.]/g, "")) * (/GB/.test(listed.size) ? 1000 : 1);
+      if (free !== null && needMB && free < needMB * 1.1)
+        throw new Error(`Not enough browser storage: ${mbText(free)} free, ${listed.label} needs about ${listed.size}.`);
+    }
+    if (name === "tfjs" || name === "webllm") await freeEngines(name);
+    loading = name;
+    try {
+      await loadEngine(id, name, model);
+    } catch (err) {
+      if (name === "webllm") { try { await engine.unload(); } catch (_) {} engine = null; }
+      if (name === "tfjs") tfjsPipe = null;
+      if (state.model === id) state.model = null;
+      throw cancelled ? new Error("Cancelled.") : err;
+    } finally {
+      loading = "";
+    }
+    if (opts.fetchOnly) {
+      // install llm all: keep the files, free the memory for the next one.
+      await freeEngines("");
+      const m = lastModels.find((x) => x.id === id);
+      if (m) m.status = "downloaded";
+      setBusy("");
+      send("D", "");
+      return;
+    }
+    state.model = id;
+    state.modelLabel = labelFor(id);
+    history = [];
+    setBusy("");
+    send("D", "");
+  }
+
+  async function loadEngine(id, name, model) {
 
     if (name === "smartest") {
       progress(100, "SmartestChild is built in");
@@ -379,11 +502,13 @@
       progress(100, "Ollama is ready");
     } else if (name === "tfjs") {
       if (!tfjs) { progress(2, "Downloading Transformers.js"); tfjs = await import(TFJS_URL); }
-      const adapter = await gpuAdapter();
+      // Phones get the CPU (WebAssembly): WebGPU there tends to run out of memory.
+      const adapter = MOBILE ? null : await gpuAdapter();
       const device = adapter ? "webgpu" : "wasm";
-      const dtype = adapter && adapter.features.has("shader-f16") ? "q4f16" : "q4";
+      const dtypes = adapter && adapter.features.has("shader-f16") ? ["q4f16", "q4"] : ["q4"];
       const files = {};
       const report = (p) => {
+        if (cancelled) throw new Error("Cancelled.");
         if (p.status === "progress" && p.file) {
           files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
           const all = Object.values(files);
@@ -393,11 +518,22 @@
       };
       if (tfjsPipe && tfjsPipe.dispose) { try { await tfjsPipe.dispose(); } catch (_) {} }
       tfjsPipe = null;
-      tfjsPipe = await tfjs.pipeline("text-generation", model, { device, dtype, progress_callback: report });
+      let lastErr = null;
+      for (const dtype of dtypes) {                 // not every model ships every format
+        try {
+          tfjsPipe = await tfjs.pipeline("text-generation", model, { device, dtype, progress_callback: report });
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (cancelled || !/locate|404|not found/i.test(String(err && err.message))) throw err;
+        }
+      }
+      if (!tfjsPipe) throw lastErr || new Error("Couldn't load " + model);
       tfjsModel = model;
     } else if (name === "webllm") {
       if (!webllm) webllm = await import(WEBLLM_URL);
       const report = (r) => {
+        if (cancelled) return;
         const text = (r.text || "").replace(/\s+/g, " ");
         const m = /(\d+)MB/i.exec(text);
         progress((r.progress || 0) * 100, /Fetching|Loading model from cache/i.test(text) ? (m ? `Downloading ${m[1]} MB` : "Downloading") : "Loading onto the GPU");
@@ -405,14 +541,10 @@
       if (!engine) engine = new webllm.MLCEngine({ initProgressCallback: report });
       else engine.setInitProgressCallback(report);
       await engine.reload(model);
+      if (cancelled) throw new Error("Cancelled.");
     } else {
       throw new Error("Unknown engine " + name);
     }
-    state.model = id;
-    state.modelLabel = labelFor(id);
-    history = [];
-    setBusy("");
-    send("D", "");
   }
 
   // Streams text to ConMon in small batches and hides <think>...</think>.
@@ -448,7 +580,7 @@
   }
 
   async function chat(text) {
-    if (!state.model) { sendText("E", "No model is loaded. Type models to pick one."); return; }
+    if (!state.model) { sendText("E", "No model is loaded. Type load to load it again, or models to pick one."); return; }
     const { name, model } = engineOf(state.model);
     history.push({ role: "user", content: text });
     if (history.length > 16) history = history.slice(-16);
@@ -479,6 +611,7 @@
       await tfjsPipe(msgs, opts);
       tfjsStopper = null;
     } else if (name === "webllm") {
+      if (!engine) throw new Error("The model isn't loaded. Type load to load it again.");
       const request = { messages, stream: true, temperature: 0.7, max_tokens: 512 };
       if (/^Qwen3/i.test(model)) request.extra_body = { enable_thinking: false };
       const stream = await engine.chat.completions.create(request);
