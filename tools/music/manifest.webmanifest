@@ -1,0 +1,14 @@
+{
+  "name": "Sigeon OS Music",
+  "short_name": "Sigeon Music",
+  "description": "Storing music all day! Your songs, kept in this browser, plus YouTube streaming.",
+  "start_url": "/music/",
+  "scope": "/music/",
+  "display": "standalone",
+  "background_color": "#120a0f",
+  "theme_color": "#120a0f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
