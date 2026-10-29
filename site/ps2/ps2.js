@@ -250,6 +250,24 @@ for (const b of ui.pad.querySelectorAll("button")) {
   ui.about.append(game.by + " · ", Object.assign(document.createElement("a"), { href: game.source, target: "_blank", rel: "noopener", textContent: "source" }), " · " + game.licence);
   ui.credit.textContent = `${game.name}: ${game.by} (${game.licence}).`;
 
+  // GitHub Pages can't send the isolation headers: a service worker adds
+  // them (coi-sw.js), then the page reloads once under it.
+  if (!window.crossOriginIsolated && "serviceWorker" in navigator && window.isSecureContext) {
+    let tried = false;
+    try { tried = sessionStorage.getItem("conmon.coi") === "1"; } catch (_) {}
+    if (!tried) {
+      try { sessionStorage.setItem("conmon.coi", "1"); } catch (_) {}
+      status("Preparing the emulator's threads…");
+      try {
+        await navigator.serviceWorker.register("coi-sw.js");
+        await navigator.serviceWorker.ready;
+        location.reload();
+        return;
+      } catch (e) { console.warn("Service worker failed:", e); }
+    }
+  }
+  try { sessionStorage.removeItem("conmon.coi"); } catch (_) {}
+
   const problems = [];
   if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") problems.push("this page isn't cross-origin isolated (SharedArrayBuffer is off), so the emulator's threads can't start. Open it from your Netlify site, not a file or a plain local server");
   if (!document.createElement("canvas").getContext("webgl2")) problems.push("this browser has no WebGL 2");

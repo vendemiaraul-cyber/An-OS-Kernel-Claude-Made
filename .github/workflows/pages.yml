@@ -1,0 +1,27 @@
+# Publishes site/ to GitHub Pages (the gh-pages branch) on every push to main,
+# with root paths prefixed for https://<owner>.github.io/<repo>/.
+name: GitHub Pages
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "tools/pages/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.repository == 'vendemiaraul-cyber/An-OS-Kernel-Claude-Made'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Pages copy
+        run: python3 tools/pages/build.py site _pages "/${{ github.event.repository.name }}"
+      - name: Push to gh-pages
+        run: |
+          cd _pages
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Pages: ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
