@@ -27,7 +27,7 @@ boot entry and interrupt stubs.
 | Packages | `install llm` adds `models`, `load` and `mp finder`; `install solMeteo` adds `meteo` | C++ |
 
 Shell commands: `help clear echo about uptime mem cpu color calc ls cat write
-append rm mv history sleep beep guess crash reboot halt install`, plus `models`,
+append rm mv history sleep beep guess crash reboot halt install run`, plus `models`,
 `load`, `mp` and `meteo` once their packages are installed.
 
 ## Packages and the host link
@@ -53,7 +53,11 @@ host -> ConMon:  STX <type> <len lo> <len hi> <payload>
   country outlines flies to the place, then the current weather and a 3-day
   forecast from Open-Meteo appear underneath. `exit` leaves.
 
-On QEMU or a real PC there is no host, and `install` says so.
+- `run v86`: lists other operating systems bundled with the site; type a
+  letter and the page opens a second emulator in a window (a full-screen
+  sheet on phones) while ConMon keeps running. `run v86 B` opens one directly.
+
+On QEMU or a real PC there is no host, and `install` and `run` say so.
 
 ## Build
 

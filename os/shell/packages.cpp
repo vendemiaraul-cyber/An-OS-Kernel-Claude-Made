@@ -4,6 +4,7 @@
 //   install llm              chat with an AI model     -> adds `models`, `load`, `mp`
 //   install llm all          ...and download every model right away
 //   install solMeteo         live weather + ASCII map  -> adds `meteo`
+//   run v86 [letter]         open another OS in a window beside ConMon
 //
 // ConMon can't run a neural network or reach the internet itself, so
 // packages work through the host link (kernel/hostlink.c): ConMon Lab, the
@@ -490,6 +491,88 @@ void cmd_meteo(Shell &sh, const Args &a) {
     meteo_loop(sh, place.c_str());
 }
 
+// ---------------------------------------------------------------- run v86
+
+// Another operating system in a second emulator window on the page, while
+// ConMon keeps running. The host keeps the catalogue of bundled systems.
+struct Guest {
+    char   letter;
+    String id, label, kind, size, about;
+};
+Vector<Guest> guests;
+
+bool fetch_guests() {
+    hostlink_send("v86.list", "");
+    hl_packet p;
+    for (;;) {
+        bool cancelled;
+        if (!wait_packet(p, 10000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
+        if (p.type == 'E') { error("%s", reinterpret_cast<const char *>(p.data)); return false; }
+        if (p.type == 'L') break;
+    }
+    // One system per line: "A|id|label|kind|size|about"
+    guests.clear();
+    for (const char *d = reinterpret_cast<const char *>(p.data); *d;) {
+        Guest g;
+        g.letter = *d;
+        g.id    = field(d, 1);
+        g.label = field(d, 2);
+        g.kind  = field(d, 3);
+        g.size  = field(d, 4);
+        g.about = field(d, 5);
+        guests.push_back(kstd::move(g));
+        while (*d && *d != '\n') d++;
+        if (*d == '\n') d++;
+    }
+    return !guests.empty();
+}
+
+const Guest *find_guest(const char *text) {
+    char want = text[0];
+    if (want >= 'a' && want <= 'z') want = (char)(want - 32);
+    if (!text[0] || text[1]) return nullptr;
+    for (const auto &g : guests) if (g.letter == want) return &g;
+    return nullptr;
+}
+
+void cmd_run(Shell &sh, const Args &a) {
+    if (a.count() < 2 || lower(a[1]) != "v86") {
+        print("usage: run v86            choose an OS to open in a window\n"
+              "       run v86 <letter>   open one directly, e.g. run v86 A\n");
+        return;
+    }
+    if (!host_available()) { no_host(); return; }
+    if (!fetch_guests()) return;
+
+    String choice;
+    if (a.count() > 2) {
+        choice = a[2];
+    } else {
+        {
+            Color c(VGA_YELLOW);
+            print("Operating systems that open in a window (ConMon keeps running):\n");
+        }
+        for (const auto &g : guests) {
+            {
+                Color c(VGA_LIGHT_CYAN);
+                kprintf("  %c  ", g.letter);
+            }
+            Color c(VGA_WHITE);
+            kprintf("%-18s", g.label.c_str());
+            vga_set_color(VGA_DARK_GREY, VGA_BLACK);
+            kprintf(" %-8s %7s  ", g.kind.c_str(), g.size.c_str());
+            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+            kprintf("%s\n", g.about.c_str());
+        }
+        print("\n");
+        choice = sh.editor().read("Type a letter to open (Enter to skip): ", false, 2);
+        if (choice.empty()) { print("Nothing opened.\n"); return; }
+    }
+    const Guest *g = find_guest(choice.c_str());
+    if (!g) { error("No system with letter %s. Type run v86 to see the list.", choice.c_str()); return; }
+    host_job(sh, "v86.open", g->id.c_str());
+}
+
 // ---------------------------------------------------------------- install
 
 void cmd_install(Shell &sh, const Args &a) {
@@ -539,6 +622,7 @@ void cmd_install(Shell &sh, const Args &a) {
 
 void packages_register(Shell &sh) {
     sh.add(new FnCommand("install", "install <llm|solMeteo>", "install a package", cmd_install));
+    sh.add(new FnCommand("run", "run v86 [letter]", "open another OS in a window", cmd_run));
 }
 
 // Handles messages the host sends on its own while the shell waits for input.

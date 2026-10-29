@@ -40,6 +40,33 @@
     ["Phi-3.5-mini-instruct", "Phi 3.5 mini"],
     ["Qwen3-4B", "Qwen3 4B (best answers)"],
   ];
+  // Systems for `run v86`: small, permissively licensed images bundled with
+  // the site (see /guests/SOURCES.txt), opened in a second emulator window.
+  const GUESTS = [
+    { id: "mikeos", label: "MikeOS 4.5", kind: "floppy", file: "/guests/mikeos.flp", size: "1.4 MB",
+      about: "Small OS with apps, BASIC, games", hint: "Press Enter for the program menu, or Esc for the command line.",
+      credit: "MikeOS Developers, BSD-3-Clause" },
+    { id: "tetros", label: "Tetros", kind: "floppy", file: "/guests/tetros.img", size: "512 B",
+      about: "Tetris in a 512-byte boot sector", hint: "Left and right move, Up rotates, Down drops.",
+      credit: "daniel-e, MIT" },
+    { id: "bootbasic", label: "bootBASIC", kind: "floppy", file: "/guests/bootbasic.img", size: "512 B",
+      about: "BASIC interpreter in 512 bytes", hint: "Lowercase only. Try: 10 print 6*7 then run",
+      credit: "Oscar Toledo G., BSD-2-Clause" },
+    { id: "bootos", label: "bootOS", kind: "floppy", file: "/guests/bootos.img", size: "512 B",
+      about: "A whole OS in one boot sector", hint: "Type format first (it sets up the disk), then dir.",
+      credit: "Oscar Toledo G., BSD-2-Clause" },
+    { id: "sectorlisp", label: "SectorLISP", kind: "floppy", file: "/guests/sectorlisp.img", size: "512 B",
+      about: "LISP in a 512-byte boot sector", hint: "Use capitals. Try: (CONS (QUOTE X) (QUOTE Y))",
+      credit: "Justine Tunney and Alain Greppin, ISC" },
+    { id: "hello", label: "Hello boot sector", kind: "floppy", file: "/kernels/hello-floppy.img", size: "512 B",
+      about: "ConMon Lab's own 512-byte demo", hint: "Type anything and it echoes back.",
+      credit: "ConMon Lab" },
+    { id: "conmon", label: "ConMon (again)", kind: "kernel", file: "/kernels/conmon.bin", size: "65 KB",
+      about: "A second ConMon, inside ConMon", hint: "A complete second ConMon. Try help or guess.",
+      credit: "ConMon Lab" },
+  ];
+  let guestOpener = null, guestOpen = null;
+
   const SYSTEM_PROMPT =
     "You are a helpful assistant running inside ConMon, a tiny hobby operating system " +
     "shown on an 80-column text screen. Answer in plain text without markdown, " +
@@ -117,6 +144,8 @@
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
         case "llm.info": await modelInfo(arg); break;
         case "meteo.show": await showMeteo(arg); break;
+        case "v86.list": listGuests(); break;
+        case "v86.open": await openGuest(arg); break;
         case "meteo.stop": meteoRun++; setBusy(""); break;
         default: break;
       }
@@ -982,6 +1011,35 @@
     send("D", "solmeteo");
   }
 
+  // ------------------------------------------------------------ run v86
+
+  function listGuests() {
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    sendText("L", GUESTS.map((g, i) => `${letters[i]}|${g.id}|${g.label}|${g.kind}|${g.size}|${g.about.slice(0, 36)}`).join("\n"));
+  }
+
+  async function openGuest(id) {
+    const g = GUESTS.find((x) => x.id === id);
+    if (!g) throw new Error("That system isn't in the list.");
+    if (!guestOpener) throw new Error("This page can't open windows.");
+    const replaced = guestOpen && guestOpen.id !== g.id ? guestOpen.label : "";
+    await guestOpener(g);
+    guestOpen = g;
+    if (replaced) sendText("M", `Closed ${replaced} to make room.`);
+    sendText("M", `Opened ${g.label} in a window. ConMon keeps running here.`);
+    sendText("M", `Tip: ${g.hint}`);
+    sendText("M", `(${g.credit})`);
+    send("D", "");
+  }
+
+  // Called by the page when the user closes the window.
+  function guestClosed() {
+    if (!guestOpen) return;
+    const label = guestOpen.label;
+    guestOpen = null;
+    sendText("M", `${label} window closed.`);
+  }
+
   // ------------------------------------------------------------ public
 
   window.ConMonHost = {
@@ -1000,6 +1058,8 @@
     checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
     get state() { return state; },
+    onGuestOpen(fn) { guestOpener = fn; },
+    guestClosed,
     // test hooks: let automated tests swap in fake engines
     _setWebLLM(mod) { webllm = mod; },
     _setTransformers(mod) { tfjs = mod; },

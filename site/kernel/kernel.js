@@ -15,6 +15,7 @@
     pkgPanel: $("pkg-panel"), pkgMeteo: $("pkg-meteo"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
     pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"),
     serial: $("serial"), serialClear: $("btn-serial-clear"),
+    keys: $("keys"), zoom: $("btn-zoom"), monitor: $("monitor"), taskbar: $("taskbar"),
   };
 
   const SAMPLES = {
@@ -24,6 +25,23 @@
   let sample = "conmon";                 // bundled kernel used when no file/URL is chosen
   const FLOPPY_MAX = 2949120;            // 2.88 MB
   const KIND_LABEL = { multiboot: "Multiboot kernel", fda: "floppy", cdrom: "CD-ROM", hda: "hard disk" };
+
+  // Emulator files. The offline preview packs them into images.js instead.
+  const packed = (name) => window.CONMON_IMAGES && window.CONMON_IMAGES.has(name);
+  function emuFiles() {
+    return {
+      wasm_path: "/v86/v86.wasm",
+      bios: packed("seabios.bin") ? { buffer: window.CONMON_IMAGES.get("seabios.bin") } : { url: "/v86/seabios.bin" },
+      vga_bios: packed("vgabios.bin") ? { buffer: window.CONMON_IMAGES.get("vgabios.bin") } : { url: "/v86/vgabios.bin" },
+    };
+  }
+  async function loadImage(url) {
+    const name = url.split("/").pop();
+    if (packed(name)) return window.CONMON_IMAGES.get(name);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Could not load ${name} (HTTP ${res.status}).`);
+    return res.arrayBuffer();
+  }
 
   let emulator = null;
   let selected = null;                   // { name, buffer } chosen by the user
@@ -110,12 +128,23 @@
     const w = visible.offsetWidth, h = visible.offsetHeight;
     if (!w || !h) return;
     const avail = ui.fit.clientWidth;
-    const scale = Math.min(avail / w, 2);
+    // Zoomed: never smaller than a readable size; the box scrolls sideways.
+    const scale = zoomed ? Math.max(Math.min(avail / w, 2), 0.95) : Math.min(avail / w, 2);
     ui.screen.style.transform = `scale(${scale})`;
     ui.fit.scrollTop = 0;
-    ui.fit.scrollLeft = 0;
+    if (!zoomed) ui.fit.scrollLeft = 0;
+    ui.screen.style.width = w + "px";
+    ui.fit.style.setProperty("--content-w", Math.ceil(w * scale) + "px");
     ui.fit.style.height = Math.ceil(h * scale) + "px";
   }
+  let zoomed = false;
+  ui.zoom.addEventListener("click", () => {
+    zoomed = !zoomed;
+    ui.fit.classList.toggle("zoomed", zoomed);
+    ui.zoom.setAttribute("aria-pressed", String(zoomed));
+    ui.zoom.textContent = zoomed ? "Fit" : "Zoom";
+    fitScreen();
+  });
   setInterval(fitScreen, 400);
   window.addEventListener("resize", fitScreen);
 
@@ -146,6 +175,22 @@
   ui.chips.addEventListener("click", (e) => {
     const cmd = e.target.closest("[data-cmd]");
     if (cmd) sendText(cmd.dataset.cmd + "\n");
+  });
+
+  // Keys a phone keyboard doesn't have, as PS/2 scancodes (press, release).
+  const SCANCODES = {
+    esc: [0x01, 0x81], tab: [0x0F, 0x8F], enter: [0x1C, 0x9C], space: [0x39, 0xB9], bksp: [0x0E, 0x8E],
+    up: [0xE0, 0x48, 0xE0, 0xC8], down: [0xE0, 0x50, 0xE0, 0xD0],
+    left: [0xE0, 0x4B, 0xE0, 0xCB], right: [0xE0, 0x4D, 0xE0, 0xCD],
+    ctrlc: [0x1D, 0x2E, 0xAE, 0x9D], ctrll: [0x1D, 0x26, 0xA6, 0x9D],
+  };
+  function sendKey(emu, key) {
+    if (!emu || !SCANCODES[key]) return;
+    emu.keyboard_send_scancodes(SCANCODES[key]);
+  }
+  ui.keys.addEventListener("click", (e) => {
+    const k = e.target.closest("[data-key]");
+    if (k) sendKey(emulator, k.dataset.key);
   });
 
   // ---------------------------------------------------------------- serial
@@ -182,6 +227,183 @@
   });
   host.checkGpu();
 
+  // ----------------------------------------------------------- run v86
+  //
+  // `run v86` in ConMon opens a second emulator in a window over the screen.
+  // Desktop: a draggable window. Phones: a full-screen sheet that can be
+  // minimised back to ConMon, which keeps running underneath.
+
+  const FLOPPY = 1474560;
+  const guest = { emu: null, el: null, info: null, minimized: false };
+
+  function guestKeyboard(on) {
+    if (guest.emu) try { guest.emu.keyboard_set_enabled(on); } catch (_) {}
+    if (guest.el) guest.el.classList.toggle("focused", on);
+  }
+
+  function fitGuest() {
+    if (!guest.el || guest.minimized) return;
+    const box = guest.el.querySelector(".vm-screen"), inner = guest.el.querySelector(".vm-inner");
+    const visible = [...inner.children].find((el) => el.style.display !== "none" && el.offsetWidth > 0);
+    if (!visible) return;
+    const w = visible.offsetWidth, h = visible.offsetHeight;
+    if (!w || !h) return;
+    // Fit by width and by height, so tall screens (Tetros) stay on screen.
+    const phone = matchMedia("(max-width: 720px)").matches;
+    const maxH = Math.max(160, Math.min(window.innerHeight * (phone ? 0.6 : 0.48), 520));
+    const scale = Math.min(box.clientWidth / w, maxH / h, 2);
+    inner.style.transform = `scale(${scale})`;
+    inner.style.marginLeft = Math.max(0, (box.clientWidth - w * scale) / 2) + "px";
+    box.style.height = Math.ceil(h * scale) + "px";
+  }
+  setInterval(fitGuest, 400);
+  window.addEventListener("resize", fitGuest);
+
+  async function closeGuest(silent) {
+    const old = guest.emu;
+    guest.emu = null;
+    if (guest.el) guest.el.remove();
+    guest.el = null;
+    ui.taskbar.hidden = true;
+    ui.taskbar.textContent = "";
+    if (old) try { await old.destroy(); } catch (_) {}
+    if (!silent) host.guestClosed();
+  }
+
+  function setMinimized(min) {
+    guest.minimized = min;
+    if (!guest.el) return;
+    guest.el.hidden = min;
+    ui.taskbar.hidden = !min;
+    if (min) {
+      ui.taskbar.textContent = `${guest.info.label} is running · tap to open`;
+      ui.fit.focus({ preventScroll: true });
+    } else {
+      guest.el.querySelector(".vm-screen").focus({ preventScroll: true });
+      setTimeout(fitGuest, 30);
+    }
+  }
+  ui.taskbar.addEventListener("click", () => setMinimized(false));
+
+  function makeDraggable(win, handle) {
+    let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button") || !matchMedia("(min-width: 721px)").matches) return;
+      dragging = true; sx = e.clientX; sy = e.clientY; ox = win.offsetLeft; oy = win.offsetTop;
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const parent = win.offsetParent || document.body;
+      const x = Math.max(0, Math.min(parent.clientWidth - win.offsetWidth, ox + e.clientX - sx));
+      const y = Math.max(0, Math.min(parent.clientHeight - 60, oy + e.clientY - sy));
+      win.style.left = x + "px"; win.style.top = y + "px"; win.style.right = "auto";
+    });
+    handle.addEventListener("pointerup", () => { dragging = false; });
+  }
+
+  function guestWindow(info) {
+    const win = document.createElement("section");
+    win.className = "vm-window";
+    win.setAttribute("aria-label", info.label + " window");
+    win.innerHTML = `
+      <header class="vm-title">
+        <span class="vm-led"></span>
+        <b class="vm-name"></b>
+        <span class="vm-state">starting</span>
+        <span class="vm-spacer"></span>
+        <button class="vm-btn" data-act="restart" title="Restart">Restart</button>
+        <button class="vm-btn" data-act="min" title="Back to ConMon">Minimise</button>
+        <button class="vm-btn vm-close" data-act="close" title="Close" aria-label="Close">×</button>
+      </header>
+      <div class="vm-screen" tabindex="0"><div class="vm-inner"><div></div><canvas style="display:none"></canvas></div></div>
+      <p class="vm-hint"></p>
+      <div class="vm-keys">
+        <button data-key="esc">Esc</button><button data-key="tab">Tab</button>
+        <button data-key="left" aria-label="Left">←</button><button data-key="up" aria-label="Up">↑</button>
+        <button data-key="down" aria-label="Down">↓</button><button data-key="right" aria-label="Right">→</button>
+        <button data-key="space">Space</button><button data-key="bksp" aria-label="Backspace">⌫</button>
+        <button data-key="enter">Enter</button>
+      </div>
+      <form class="vm-type" autocomplete="off">
+        <input class="field" placeholder="Type to ${info.label.replace(/"/g, "")}" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+        <button class="btn" type="submit">Send</button>
+      </form>`;
+    win.querySelector(".vm-name").textContent = info.label;
+    win.querySelector(".vm-hint").textContent = info.hint;
+    const screen = win.querySelector(".vm-screen");
+    screen.addEventListener("pointerdown", () => screen.focus({ preventScroll: true }));
+    screen.addEventListener("focus", () => guestKeyboard(true));
+    screen.addEventListener("blur", () => guestKeyboard(false));
+    win.querySelector(".vm-title").addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]");
+      if (!act) return;
+      if (act.dataset.act === "close") closeGuest(false);
+      else if (act.dataset.act === "min") setMinimized(true);
+      else if (act.dataset.act === "restart" && guest.emu) guest.emu.restart();
+    });
+    win.querySelector(".vm-keys").addEventListener("click", (e) => {
+      const k = e.target.closest("[data-key]");
+      if (k) sendKey(guest.emu, k.dataset.key);
+    });
+    win.querySelector(".vm-type").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = win.querySelector(".vm-type input");
+      // Paced typing: boot-sector programs read keys through the BIOS, whose
+      // buffer holds only ~15 keys, so typing at full speed loses letters.
+      // Lines queue up, so sending twice quickly never interleaves letters.
+      const emu = guest.emu, text = input.value + "\n";
+      input.value = "";
+      if (!emu) return;
+      guest.typing = (guest.typing || Promise.resolve()).then(async () => {
+        if (guest.emu !== emu) return;
+        emu.keyboard_set_enabled(true);
+        try { await emu.keyboard_send_text(text, 35); } catch (_) {}
+        if (guest.emu === emu) emu.keyboard_set_enabled(document.activeElement === screen);
+      });
+    });
+    makeDraggable(win, win.querySelector(".vm-title"));
+    return win;
+  }
+
+  // Called by the host link when ConMon runs `run v86 <letter>`.
+  host.onGuestOpen(async (info) => {
+    await closeGuest(true);
+    let buffer = await loadImage(info.file);
+    const kind = info.kind === "kernel" ? "multiboot" : "fda";
+    if (kind === "fda" && buffer.byteLength < FLOPPY) {      // boot sectors -> a full 1.44 MB floppy
+      const padded = new Uint8Array(FLOPPY);
+      padded.set(new Uint8Array(buffer));
+      buffer = padded.buffer;
+    }
+    const win = guestWindow(info);
+    ui.monitor.append(win);
+    guest.el = win;
+    guest.info = info;
+    guest.minimized = false;
+    guest.typing = null;
+    ui.taskbar.hidden = true;
+    const options = {
+      ...emuFiles(),
+      screen_container: win.querySelector(".vm-inner"),
+      memory_size: 32 * 1024 * 1024,
+      vga_memory_size: 8 * 1024 * 1024,
+      autostart: true,
+      disable_mouse: true,
+    };
+    options[kind] = { buffer };
+    if (kind === "fda") options.boot_order = 0x321;
+    const emu = new V86(options);
+    guest.emu = emu;
+    emu.add_listener("emulator-started", () => {
+      if (guest.emu !== emu) return;
+      win.querySelector(".vm-state").textContent = "running";
+      win.classList.add("running");
+      win.querySelector(".vm-screen").focus({ preventScroll: true });
+      setTimeout(fitGuest, 50);
+    });
+  });
+
   async function stopEmulator() {
     host.detach();
     if (!emulator) return;
@@ -204,9 +426,7 @@
     }
     if (selected) return selected;
     const s = SAMPLES[sample];
-    const res = await fetch(s.url);
-    if (!res.ok) throw new Error(`Could not load the bundled ${s.label} image.`);
-    return { name: s.name, buffer: await res.arrayBuffer(), bundled: sample };
+    return { name: s.name, buffer: await loadImage(s.url), bundled: sample };
   }
 
   async function boot() {
@@ -234,9 +454,7 @@
 
       const ramMB = parseInt(ui.ram.value, 10);
       const options = {
-        wasm_path: "/v86/v86.wasm",
-        bios: { url: "/v86/seabios.bin" },
-        vga_bios: { url: "/v86/vgabios.bin" },
+        ...emuFiles(),
         screen_container: ui.screen,
         memory_size: ramMB * 1024 * 1024,
         vga_memory_size: 8 * 1024 * 1024,

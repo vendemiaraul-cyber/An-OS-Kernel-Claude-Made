@@ -50,6 +50,58 @@
     .pill { font: 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
     .pill.on { color: var(--accent); border-color: rgba(74,222,128,.45); }
     .chip.pkg { border-color: rgba(74,222,128,.35); color: #a7f3c0; }
+    .monitor { position: relative; }
+    .taskbar[hidden], .vm-window[hidden] { display: none; }
+    .taskbar { display: flex; width: 100%; align-items: center; gap: 8px; margin: 0 0 10px; padding: 9px 12px; border-radius: 9px; border: 1px solid rgba(74,222,128,.45); background: rgba(74,222,128,.08); color: #a7f3c0; font: 13px var(--mono); cursor: pointer; text-align: left; }
+    .taskbar::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); flex: none; }
+    .screen-fit.zoomed { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .screen-fit.zoomed #screen { margin-right: 0; }
+    .keys { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .keys button, .vm-keys button { min-width: 44px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: 13px var(--mono); cursor: pointer; touch-action: manipulation; }
+    .keys button:active, .vm-keys button:active { background: #26303a; }
+
+    /* run v86: a second PC in a window over ConMon's screen */
+    .vm-window { position: absolute; top: 56px; right: 18px; width: min(660px, calc(100% - 36px)); z-index: 20; background: #0d1014; border: 1px solid #3a4450; border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.7); display: flex; flex-direction: column; overflow: hidden; }
+    .vm-window.focused { border-color: rgba(74,222,128,.6); }
+    .vm-title { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; background: #161b21; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; touch-action: none; }
+    .vm-led { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+    .vm-window.running .vm-led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .vm-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .vm-state { font: 12px var(--mono); color: var(--muted); }
+    .vm-spacer { flex: 1; }
+    .vm-btn { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+    .vm-close { font-size: 16px; line-height: 1; padding: 4px 10px; }
+    .vm-screen { background: #000; overflow: hidden; outline: none; min-height: 160px; cursor: text; }
+    .vm-inner { transform-origin: top left; display: inline-block; }
+    .vm-inner > div { white-space: pre; font: 14px/14px var(--mono); color: #c0c0c0; }
+    .vm-inner canvas { display: block; image-rendering: pixelated; }
+    .vm-hint { margin: 0; padding: 8px 12px 0; color: var(--muted); font-size: 13px; }
+    .vm-keys { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+    .vm-type { display: flex; gap: 8px; padding: 8px 12px 12px; }
+    .vm-type .field { flex: 1; min-width: 0; font-family: var(--mono); }
+
+    /* Phones */
+    @media (max-width: 720px) {
+      main.wrap > section:first-child h1 { font-size: 28px; }
+      main.wrap > section:first-child .lead { font-size: 15px; }
+      .layout { margin-top: 14px; }
+      .monitor { margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px))); border-radius: 0; border-left: 0; border-right: 0; padding: 10px max(10px, env(safe-area-inset-right, 0px)) 12px max(10px, env(safe-area-inset-left, 0px)); }
+      .monitor-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; }
+      .monitor-bar::-webkit-scrollbar { display: none; }
+      .monitor-bar .name { display: none; }
+      .monitor-bar .btn { flex: none; padding: 6px 9px; font-size: 12px; }
+      .screen-fit { min-height: 150px; border-radius: 4px; }
+      .typebar { position: sticky; bottom: env(safe-area-inset-bottom, 0px); z-index: 5; background: #050607; padding-top: 8px; margin-top: 4px; }
+      .typebar .field { font-size: 16px; }              /* stops iOS zooming in on focus */
+      .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+      .chips::-webkit-scrollbar { display: none; }
+      .chip { flex: none; padding: 8px 12px; font-size: 13px; }
+      .keys button { flex: 1 1 0; min-width: 0; }
+      .vm-window { position: fixed; inset: 0; width: auto; border-radius: 0; border: 0; z-index: 50; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); overflow-y: auto; }
+      .vm-title { cursor: default; }
+      .vm-type .field { font-size: 16px; }
+      .vm-keys button { flex: 1 1 calc(20% - 6px); min-width: 0; min-height: 44px; }
+    }
     .tips li { margin: 6px 0; }
     .tips { padding-left: 18px; margin: 0; color: var(--muted); font-size: 14px; }
     .tips b { color: var(--text); font-weight: 600; }
@@ -75,7 +127,7 @@
     <div class="layout">
       <!-- emulator -->
       <section>
-        <div class="monitor">
+        <div class="monitor" id="monitor">
           <div class="monitor-bar">
             <span id="status" class="badge"><span class="led"></span><span id="status-text">idle</span></span>
             <span id="current-name" class="name"></span>
@@ -83,7 +135,9 @@
             <button class="btn" id="btn-restart" disabled>Restart</button>
             <button class="btn" id="btn-cad" disabled title="Send Ctrl+Alt+Del">Ctrl+Alt+Del</button>
             <button class="btn" id="btn-full" disabled>Fullscreen</button>
+            <button class="btn" id="btn-zoom" aria-pressed="false" title="Bigger text; swipe the screen sideways">Zoom</button>
           </div>
+          <button class="taskbar" id="taskbar" hidden></button>
 
           <div class="screen-fit" id="screen-fit" tabindex="0" aria-label="Emulator screen. Click, then type.">
             <div id="screen"></div>
@@ -99,6 +153,11 @@
             <input class="field" id="type-input" placeholder="Type a command and press Send (handy on phones)" enterkeyhint="send" autocapitalize="off" spellcheck="false">
             <button class="btn primary" type="submit">Send</button>
           </form>
+          <div class="keys" id="keys" aria-label="Special keys">
+            <button data-key="esc">Esc</button><button data-key="tab">Tab</button>
+            <button data-key="up" aria-label="Up, previous command">↑</button><button data-key="down" aria-label="Down">↓</button>
+            <button data-key="ctrlc">Ctrl+C</button><button data-key="ctrll">Ctrl+L</button>
+          </div>
           <div class="chips" id="chips" aria-label="ConMon commands">
             <button class="chip" data-cmd="help">help</button>
             <button class="chip" data-cmd="calc (2+3)*7">calc (2+3)*7</button>
@@ -109,6 +168,7 @@
             <button class="chip" data-cmd="uptime">uptime</button>
             <button class="chip" data-cmd="guess">guess</button>
             <button class="chip" data-cmd="crash">crash</button>
+            <button class="chip pkg" data-cmd="run v86">run v86</button>
             <button class="chip pkg" data-cmd="install llm">install llm</button>
             <button class="chip pkg" data-cmd="install llm all">install llm all</button>
             <button class="chip pkg" data-cmd="load">load</button>
