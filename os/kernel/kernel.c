@@ -78,6 +78,9 @@ void kmain(uint32_t magic, struct multiboot_info *mbi) {
     keyboard_init();
     status("PS/2 keyboard");
 
+    serial_enable_rx();
+    status("Serial port COM1 (host link)");
+
     irq_enable();
     status("Interrupts enabled");
 

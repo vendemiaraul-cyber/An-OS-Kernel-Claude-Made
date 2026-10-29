@@ -161,6 +161,12 @@ static void test_shell() {
     CHECK(contains(o, "C++"));
     CHECK(contains(o, "color: fg 0-15"));
 
+    // Without a host link, install explains instead of hanging.
+    o = run_shell("install\ninstall mp4\nplay x\n");
+    CHECK(contains(o, "mp4   MP4 video player"));
+    CHECK(contains(o, "No host link found."));
+    CHECK(contains(o, "unknown command: play"));
+
     o = run_shell("reboot\n");
     CHECK(contains(o, "Rebooting"));
 

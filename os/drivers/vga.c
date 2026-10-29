@@ -37,9 +37,25 @@ void vga_clear(void) {
     move_cursor();
 }
 
+void vga_cursor_visible(int on) {
+    outb(0x3D4, 0x0A);
+    uint8_t v = inb(0x3D5);
+    outb(0x3D5, on ? (v & ~0x20) : (v | 0x20));
+}
+
+/* Attribute controller register 0x10, bit 3: 1 = blink, 0 = 16 background
+ * colours. ConMon never blinks, and the MP4 player wants all 16. */
+void vga_disable_blink(void) {
+    inb(0x3DA);                         /* reset the address/data flip-flop */
+    outb(0x3C0, 0x30);                  /* index 0x10, keep palette enabled */
+    uint8_t mode = inb(0x3C1);
+    outb(0x3C0, mode & ~0x08);
+}
+
 void vga_init(void) {
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     enable_cursor();
+    vga_disable_blink();
     vga_clear();
 }
 

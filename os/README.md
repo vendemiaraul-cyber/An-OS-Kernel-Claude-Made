@@ -23,9 +23,33 @@ boot entry and interrupt stubs.
 | C++ runtime | `new`/`delete`, global constructors, pure-virtual trap; small `String` and `Vector<T>` | C++ |
 | Shell | Line editor with history (↑/↓), Ctrl+C, Ctrl+L, quoted arguments, 22 commands | C++ |
 | RAM disk | Flat in-memory filesystem: `ls cat write append rm mv` | C++ |
+| Host link | Message protocol over COM1 (interrupt-driven receive) | C |
+| Packages | `install mp4` adds `play`; `install llm` adds `models` and `load` | C++ |
 
 Shell commands: `help clear echo about uptime mem cpu color calc ls cat write
-append rm mv history sleep beep guess crash reboot halt`.
+append rm mv history sleep beep guess crash reboot halt install`, plus `play`,
+`models` and `load` once their packages are installed.
+
+## Packages and the host link
+
+ConMon can't decode video or run a neural network by itself, so packages lean
+on a *host*: ConMon Lab, the web page running the emulator. They talk over the
+serial port (`kernel/hostlink.c`):
+
+```
+ConMon -> host:  ESC ] "CM;" <type> ";" <payload> BEL
+host -> ConMon:  STX <type> <len lo> <len hi> <payload>
+```
+
+- `install mp4`: the host downloads four sample videos and puts `ep1.mp4` to
+  `ep4.mp4` on the RAM disk. `play ep1.mp4` streams frames that the host
+  decodes and shrinks to 80x48 "pixels"; ConMon draws them with the upper-half
+  block character in all 16 VGA colours (`q` quits, space pauses).
+- `install llm`: the host checks for WebGPU, loads WebLLM and lists the models
+  that fit your GPU, each with a letter. Type a letter to download, then `load`
+  to chat. The model runs on your GPU in the browser; ConMon is the terminal.
+
+On QEMU or a real PC there is no host, and `install` says so.
 
 ## Build
 

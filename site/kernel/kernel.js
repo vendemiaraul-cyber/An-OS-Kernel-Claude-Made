@@ -12,6 +12,8 @@
     file: $("file"), drop: $("drop"), fileInfo: $("file-info"), url: $("url"),
     kind: $("kind"), ram: $("ram"),
     typebar: $("typebar"), typeInput: $("type-input"), chips: $("chips"),
+    pkgPanel: $("pkg-panel"), pkgMp4: $("pkg-mp4"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
+    pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"), sendMp4: $("send-mp4"), mp4File: $("mp4-file"),
     serial: $("serial"), serialClear: $("btn-serial-clear"),
   };
 
@@ -166,7 +168,30 @@
 
   // ------------------------------------------------------------------ boot
 
+  // ------------------------------------------------------------ packages
+
+  const host = window.ConMonHost;
+  host.onStateChange((st) => {
+    ui.pkgMp4.textContent = st.mp4 ? "installed" : "not installed";
+    ui.pkgMp4.className = "pill" + (st.mp4 ? " on" : "");
+    ui.pkgLlm.textContent = st.llm ? "installed" : "not installed";
+    ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
+    ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
+    ui.pkgModel.textContent = st.model ? st.model.replace(/-MLC$/, "") : "no model loaded";
+    ui.pkgBusy.textContent = st.busy ? "host: " + st.busy + "…" : "";
+    ui.sendMp4.disabled = !st.mp4;
+  });
+  host.checkGpu();
+  ui.sendMp4.addEventListener("click", () => ui.mp4File.click());
+  ui.mp4File.addEventListener("change", async () => {
+    const f = ui.mp4File.files[0];
+    ui.mp4File.value = "";
+    if (f) await host.addUserVideo(f);
+    ui.fit.focus({ preventScroll: true });
+  });
+
   async function stopEmulator() {
+    host.detach();
     if (!emulator) return;
     const old = emulator;
     emulator = null;
@@ -207,6 +232,7 @@
       ui.chips.classList.toggle("hidden", src.bundled !== "conmon");
       let kind = ui.kind.value;
       if (kind === "auto") kind = detectKind(src.name, src.buffer);
+      ui.pkgPanel.classList.toggle("hidden", src.bundled !== "conmon" && kind !== "multiboot");
       if (kind === "fda" && src.buffer.byteLength > FLOPPY_MAX)
         throw new Error("That image is bigger than a 2.88 MB floppy. Boot it as a hard disk instead.");
 
@@ -239,7 +265,8 @@
         setStatus("error", "err");
         showOverlay("Failed to download " + (e && e.file_name ? e.file_name : "emulator files"), true);
       });
-      emu.add_listener("serial0-output-byte", serialByte);
+      host.attach(emu, serialByte);
+      emu.add_listener("serial0-output-byte", (b) => host.onByte(b));
       emu.add_listener("emulator-started", () => {
         if (emulator !== emu) return;
         ui.overlay.classList.add("hidden");

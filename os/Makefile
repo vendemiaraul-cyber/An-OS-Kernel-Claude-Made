@@ -25,9 +25,9 @@ LIBGCC  := $(wildcard $(shell $(CC) $(ARCH) -print-libgcc-file-name 2>/dev/null)
 LDFLAGS  = $(ARCH) -T linker.ld -nostdlib -ffreestanding -no-pie -Wl,--build-id=none
 
 ASM_SRC = boot/boot.asm boot/interrupts.asm
-C_SRC   = kernel/kernel.c cpu/gdt.c cpu/idt.c drivers/vga.c drivers/serial.c \
+C_SRC   = kernel/kernel.c kernel/hostlink.c cpu/gdt.c cpu/idt.c drivers/vga.c drivers/serial.c \
           drivers/timer.c drivers/keyboard.c mm/kheap.c lib/string.c lib/kprintf.c
-CXX_SRC = shell/cxxrt.cpp shell/shell.cpp shell/ramfs.cpp shell/calc.cpp
+CXX_SRC = shell/cxxrt.cpp shell/shell.cpp shell/ramfs.cpp shell/calc.cpp shell/packages.cpp
 
 OBJ = $(patsubst %,build/%.o,$(ASM_SRC) $(C_SRC) $(CXX_SRC))
 
@@ -62,15 +62,16 @@ iso: conmon.bin
 
 # Host-side tests: runs printf, heap, calculator, RAM fs and the whole C++
 # shell (with scripted keystrokes) as a normal Linux program under ASan/UBSan.
-HOST_FLAGS = -g -O1 -Wall -Wextra -Iinclude -fsanitize=address,undefined -fno-sanitize-recover
+HOST_FLAGS = -g -O1 -Wall -Wextra -Iinclude -DCONMON_HOST_TEST -fsanitize=address,undefined -fno-sanitize-recover
 test:
 	@mkdir -p build/host
 	gcc $(HOST_FLAGS) -c lib/kprintf.c  -o build/host/kprintf.o
 	gcc $(HOST_FLAGS) -c mm/kheap.c     -o build/host/kheap.o
 	gcc $(HOST_FLAGS) -c tests/host_stubs.c -o build/host/stubs.o
+	gcc $(HOST_FLAGS) -c kernel/hostlink.c -o build/host/hostlink.o
 	g++ $(HOST_FLAGS) -std=gnu++17 -fno-exceptions -fno-rtti tests/host_test.cpp \
-	    shell/shell.cpp shell/ramfs.cpp shell/calc.cpp \
-	    build/host/kprintf.o build/host/kheap.o build/host/stubs.o -o build/host/conmon_test
+	    shell/shell.cpp shell/ramfs.cpp shell/calc.cpp shell/packages.cpp \
+	    build/host/kprintf.o build/host/kheap.o build/host/stubs.o build/host/hostlink.o -o build/host/conmon_test
 	ASAN_OPTIONS=detect_leaks=0 ./build/host/conmon_test
 
 clean:

@@ -31,6 +31,17 @@ uint32_t timer_ticks(void) { return test_ticks += 7; }
 void timer_sleep(uint32_t ms) { test_ticks += ms / 10; }
 void speaker_beep(uint32_t f, uint32_t ms) { (void)f; (void)ms; }
 
+int keyboard_poll(void) {           /* never -1: the shell would execute hlt */
+    if (!test_keys || !*test_keys) longjmp(test_done, 1);
+    return (unsigned char)*test_keys++;
+}
+int serial_read(void) { return -1; }
+void cpu_halt(void) {}
+int serial_available(void) { return 0; }
+void serial_putc_raw(char c) { (void)c; }
+void vga_put_at(char c, uint8_t col, int x, int y) { (void)c; (void)col; (void)x; (void)y; }
+void vga_cursor_visible(int on) { (void)on; }
+
 int keyboard_getchar(void) {
     if (!test_keys || !*test_keys) longjmp(test_done, 1);
     return (unsigned char)*test_keys++;

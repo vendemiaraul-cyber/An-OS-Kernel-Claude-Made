@@ -27,7 +27,11 @@ static inline void outw(uint16_t port, uint16_t val) {
     __asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
 }
 static inline void io_wait(void) { outb(0x80, 0); }
+#ifndef CONMON_HOST_TEST
 static inline void cpu_halt(void) { __asm__ volatile ("hlt"); }
+#else
+void cpu_halt(void);                    /* host tests: a no-op stub */
+#endif
 static inline void irq_enable(void) { __asm__ volatile ("sti"); }
 static inline void irq_disable(void) { __asm__ volatile ("cli"); }
 
@@ -60,11 +64,28 @@ void    vga_write(const char *s);
 void    vga_set_color(uint8_t fg, uint8_t bg);
 uint8_t vga_get_color(void);
 void    vga_put_at(char c, uint8_t color, int x, int y);
+void    vga_cursor_visible(int on);
+void    vga_disable_blink(void);        /* attribute bit 7 = bright background */
 
 /* ---------- serial port COM1 (drivers/serial.c) ---------- */
 void serial_init(void);
-void serial_putc(char c);
+void serial_enable_rx(void);            /* interrupt-driven receive (IRQ4) */
+int  serial_read(void);                 /* next received byte, or -1 */
+int  serial_available(void);
+void serial_putc(char c);               /* '\n' becomes "\r\n" */
+void serial_putc_raw(char c);
 void serial_write(const char *s);
+
+/* ---------- host link over COM1 (kernel/hostlink.c) ---------- */
+#define HOSTLINK_MAX 8192
+struct hl_packet {
+    char           type;                /* e.g. 'P' progress, 'T' text, 'F' frame */
+    uint32_t       len;
+    const uint8_t *data;                /* NUL-terminated, valid until next poll */
+};
+int  hostlink_poll(struct hl_packet *out);      /* 1 when a packet is ready */
+void hostlink_send(const char *type, const char *payload);
+void hostlink_reset(void);
 
 /* ---------- formatted output (lib/kprintf.c) ---------- */
 /* Supports %c %s %d %i %u %x %X %p %% with optional '-' (left align),
