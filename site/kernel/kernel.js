@@ -15,12 +15,24 @@
     pkgPanel: $("pkg-panel"), pkgMeteo: $("pkg-meteo"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
     pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"),
     serial: $("serial"), serialClear: $("btn-serial-clear"),
-    keys: $("keys"), zoom: $("btn-zoom"), monitor: $("monitor"), taskbar: $("taskbar"),
+    gamePad: $("game-pad"), keys: $("keys"), zoom: $("btn-zoom"), monitor: $("monitor"), taskbar: $("taskbar"), hint: $("screen-hint"),
   };
 
+  // Bundled systems. All permissively licensed; see /guests/SOURCES.txt.
   const SAMPLES = {
     conmon: { name: "conmon.bin", url: "/kernels/conmon.bin", label: "ConMon" },
-    hello: { name: "hello-floppy.img", url: "/kernels/hello-floppy.img", label: "Hello boot sector" },
+    mikeos: { name: "mikeos.flp", url: "/guests/mikeos.flp", label: "MikeOS 4.5",
+      hint: "MikeOS: press Enter for the program menu, then Enter again to run DOOM.BAS (it is at the top). For the command line, press → then Enter at the welcome box." },
+    tetros: { name: "tetros.img", url: "/guests/tetros.img", label: "Tetros",
+      hint: "Tetros: Left and Right move, Up rotates, Down drops. Tap the screen first on a phone, then use the arrow keys below." },
+    bootbasic: { name: "bootbasic.img", url: "/guests/bootbasic.img", label: "bootBASIC",
+      hint: "bootBASIC: lowercase only. Try 10 print 6*7, then run." },
+    bootos: { name: "bootos.img", url: "/guests/bootos.img", label: "bootOS",
+      hint: "bootOS: type format first (it sets up the disk), then dir." },
+    sectorlisp: { name: "sectorlisp.img", url: "/guests/sectorlisp.img", label: "SectorLISP",
+      hint: "SectorLISP: use capitals. Try (CONS (QUOTE X) (QUOTE Y))" },
+    hello: { name: "hello-floppy.img", url: "/kernels/hello-floppy.img", label: "Hello boot sector",
+      hint: "Hello boot sector: type anything and it echoes back." },
   };
   let sample = "conmon";                 // bundled kernel used when no file/URL is chosen
   const FLOPPY_MAX = 2949120;            // 2.88 MB
@@ -223,188 +235,146 @@
     ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
     ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
     ui.pkgModel.textContent = st.model ? "model: " + (st.modelLabel || st.model.replace(/-MLC$/, "")) : "no model loaded";
+    for (const name of ["doom", "doomy"]) {
+      const el = document.getElementById("pkg-" + name);
+      if (el) { el.textContent = st[name] ? "installed" : "not installed"; el.className = "pill" + (st[name] ? " on" : ""); }
+    }
     ui.pkgBusy.textContent = st.busy ? "host: " + st.busy + "…" : "";
+    // While a game runs on ConMon's screen, swap the key row for the game pad.
+    // Starting a game also gives the screen the keyboard, so a PC's keys play.
+    if (st.game && ui.gamePad.hidden) ui.fit.focus({ preventScroll: true });
+    ui.gamePad.hidden = !st.game;
+    ui.keys.hidden = !!st.game;
   });
   host.checkGpu();
 
-  // ----------------------------------------------------------- run v86
-  //
-  // `run v86` in ConMon opens a second emulator in a window over the screen.
-  // Desktop: a draggable window. Phones: a full-screen sheet that can be
-  // minimised back to ConMon, which keeps running underneath.
-
-  const FLOPPY = 1474560;
-  const guest = { emu: null, el: null, info: null, minimized: false };
-
-  function guestKeyboard(on) {
-    if (guest.emu) try { guest.emu.keyboard_set_enabled(on); } catch (_) {}
-    if (guest.el) guest.el.classList.toggle("focused", on);
+  // Game pad: hold-able buttons that send real press/release scancodes to
+  // the emulated keyboard, so ConMon (in raw mode) forwards them to the game.
+  function padSend(btn, down) {
+    if (!emulator) return;
+    const code = parseInt(btn.dataset.sc, 16) | (down ? 0 : 0x80);
+    emulator.keyboard_send_scancodes(btn.hasAttribute("data-e0") ? [0xE0, code] : [code]);
+    btn.classList.toggle("held", down);
   }
-
-  function fitGuest() {
-    if (!guest.el || guest.minimized) return;
-    const box = guest.el.querySelector(".vm-screen"), inner = guest.el.querySelector(".vm-inner");
-    const visible = [...inner.children].find((el) => el.style.display !== "none" && el.offsetWidth > 0);
-    if (!visible) return;
-    const w = visible.offsetWidth, h = visible.offsetHeight;
-    if (!w || !h) return;
-    // Fit by width and by height, so tall screens (Tetros) stay on screen.
-    const phone = matchMedia("(max-width: 720px)").matches;
-    const maxH = Math.max(160, Math.min(window.innerHeight * (phone ? 0.6 : 0.48), 520));
-    const scale = Math.min(box.clientWidth / w, maxH / h, 2);
-    inner.style.transform = `scale(${scale})`;
-    inner.style.marginLeft = Math.max(0, (box.clientWidth - w * scale) / 2) + "px";
-    box.style.height = Math.ceil(h * scale) + "px";
-  }
-  setInterval(fitGuest, 400);
-  window.addEventListener("resize", fitGuest);
-
-  async function closeGuest(silent) {
-    const old = guest.emu;
-    guest.emu = null;
-    if (guest.el) guest.el.remove();
-    guest.el = null;
-    ui.taskbar.hidden = true;
-    ui.taskbar.textContent = "";
-    if (old) try { await old.destroy(); } catch (_) {}
-    if (!silent) host.guestClosed();
-  }
-
-  function setMinimized(min) {
-    guest.minimized = min;
-    if (!guest.el) return;
-    guest.el.hidden = min;
-    ui.taskbar.hidden = !min;
-    if (min) {
-      ui.taskbar.textContent = `${guest.info.label} is running · tap to open`;
-      ui.fit.focus({ preventScroll: true });
-    } else {
-      guest.el.querySelector(".vm-screen").focus({ preventScroll: true });
-      setTimeout(fitGuest, 30);
-    }
-  }
-  ui.taskbar.addEventListener("click", () => setMinimized(false));
-
-  function makeDraggable(win, handle) {
-    let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
-    handle.addEventListener("pointerdown", (e) => {
-      if (e.target.closest("button") || !matchMedia("(min-width: 721px)").matches) return;
-      dragging = true; sx = e.clientX; sy = e.clientY; ox = win.offsetLeft; oy = win.offsetTop;
-      handle.setPointerCapture(e.pointerId);
-    });
-    handle.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
-      const parent = win.offsetParent || document.body;
-      const x = Math.max(0, Math.min(parent.clientWidth - win.offsetWidth, ox + e.clientX - sx));
-      const y = Math.max(0, Math.min(parent.clientHeight - 60, oy + e.clientY - sy));
-      win.style.left = x + "px"; win.style.top = y + "px"; win.style.right = "auto";
-    });
-    handle.addEventListener("pointerup", () => { dragging = false; });
-  }
-
-  function guestWindow(info) {
-    const win = document.createElement("section");
-    win.className = "vm-window";
-    win.setAttribute("aria-label", info.label + " window");
-    win.innerHTML = `
-      <header class="vm-title">
-        <span class="vm-led"></span>
-        <b class="vm-name"></b>
-        <span class="vm-state">starting</span>
-        <span class="vm-spacer"></span>
-        <button class="vm-btn" data-act="restart" title="Restart">Restart</button>
-        <button class="vm-btn" data-act="min" title="Back to ConMon">Minimise</button>
-        <button class="vm-btn vm-close" data-act="close" title="Close" aria-label="Close">×</button>
-      </header>
-      <div class="vm-screen" tabindex="0"><div class="vm-inner"><div></div><canvas style="display:none"></canvas></div></div>
-      <p class="vm-hint"></p>
-      <div class="vm-keys">
-        <button data-key="esc">Esc</button><button data-key="tab">Tab</button>
-        <button data-key="left" aria-label="Left">←</button><button data-key="up" aria-label="Up">↑</button>
-        <button data-key="down" aria-label="Down">↓</button><button data-key="right" aria-label="Right">→</button>
-        <button data-key="space">Space</button><button data-key="bksp" aria-label="Backspace">⌫</button>
-        <button data-key="enter">Enter</button>
-      </div>
-      <form class="vm-type" autocomplete="off">
-        <input class="field" placeholder="Type to ${info.label.replace(/"/g, "")}" autocapitalize="off" spellcheck="false" enterkeyhint="send">
-        <button class="btn" type="submit">Send</button>
-      </form>`;
-    win.querySelector(".vm-name").textContent = info.label;
-    win.querySelector(".vm-hint").textContent = info.hint;
-    const screen = win.querySelector(".vm-screen");
-    screen.addEventListener("pointerdown", () => screen.focus({ preventScroll: true }));
-    screen.addEventListener("focus", () => guestKeyboard(true));
-    screen.addEventListener("blur", () => guestKeyboard(false));
-    win.querySelector(".vm-title").addEventListener("click", (e) => {
-      const act = e.target.closest("[data-act]");
-      if (!act) return;
-      if (act.dataset.act === "close") closeGuest(false);
-      else if (act.dataset.act === "min") setMinimized(true);
-      else if (act.dataset.act === "restart" && guest.emu) guest.emu.restart();
-    });
-    win.querySelector(".vm-keys").addEventListener("click", (e) => {
-      const k = e.target.closest("[data-key]");
-      if (k) sendKey(guest.emu, k.dataset.key);
-    });
-    win.querySelector(".vm-type").addEventListener("submit", (e) => {
-      e.preventDefault();
-      const input = win.querySelector(".vm-type input");
-      // Paced typing: boot-sector programs read keys through the BIOS, whose
-      // buffer holds only ~15 keys, so typing at full speed loses letters.
-      // Lines queue up, so sending twice quickly never interleaves letters.
-      const emu = guest.emu, text = input.value + "\n";
-      input.value = "";
-      if (!emu) return;
-      guest.typing = (guest.typing || Promise.resolve()).then(async () => {
-        if (guest.emu !== emu) return;
-        emu.keyboard_set_enabled(true);
-        try { await emu.keyboard_send_text(text, 35); } catch (_) {}
-        if (guest.emu === emu) emu.keyboard_set_enabled(document.activeElement === screen);
-      });
-    });
-    makeDraggable(win, win.querySelector(".vm-title"));
-    return win;
-  }
-
-  // Called by the host link when ConMon runs `run v86 <letter>`.
-  host.onGuestOpen(async (info) => {
-    await closeGuest(true);
-    let buffer = await loadImage(info.file);
-    const kind = info.kind === "kernel" ? "multiboot" : "fda";
-    if (kind === "fda" && buffer.byteLength < FLOPPY) {      // boot sectors -> a full 1.44 MB floppy
-      const padded = new Uint8Array(FLOPPY);
-      padded.set(new Uint8Array(buffer));
-      buffer = padded.buffer;
-    }
-    const win = guestWindow(info);
-    ui.monitor.append(win);
-    guest.el = win;
-    guest.info = info;
-    guest.minimized = false;
-    guest.typing = null;
-    ui.taskbar.hidden = true;
-    const options = {
-      ...emuFiles(),
-      screen_container: win.querySelector(".vm-inner"),
-      memory_size: 32 * 1024 * 1024,
-      vga_memory_size: 8 * 1024 * 1024,
-      autostart: true,
-      disable_mouse: true,
-    };
-    options[kind] = { buffer };
-    if (kind === "fda") options.boot_order = 0x321;
-    const emu = new V86(options);
-    guest.emu = emu;
-    emu.add_listener("emulator-started", () => {
-      if (guest.emu !== emu) return;
-      win.querySelector(".vm-state").textContent = "running";
-      win.classList.add("running");
-      win.querySelector(".vm-screen").focus({ preventScroll: true });
-      setTimeout(fitGuest, 50);
-    });
+  ui.gamePad.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("[data-sc]");
+    if (!b) return;
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch (_) {}
+    padSend(b, true);
   });
+  for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    ui.gamePad.addEventListener(t, (e) => {
+      const b = e.target.closest("[data-sc]");
+      if (b && b.classList.contains("held")) padSend(b, false);
+    });
+  }
+  ui.gamePad.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // ------------------------------------------------------- DOOM window
+  //
+  // MikeOS is a 16-bit OS and can't run DOOM, so its DOOM.BAS program sends
+  // ESC ] CM;window.doom BEL out of COM1 and the page opens DOOM here, in a
+  // window over the guest's screen. The guest keeps running underneath.
+
+  const doomUi = { win: $("doom-window"), screen: $("doom-screen"), canvas: $("doom-canvas"),
+    state: $("doom-state"), close: $("doom-close"), pad: $("doom-pad") };
+  let doomRun = null;                       // { doom, timer, run }
+  let doomRunId = 0;
+  const DOOM_KEYS = { ArrowUp: "UPARROW", ArrowDown: "DOWNARROW", ArrowLeft: "LEFTARROW", ArrowRight: "RIGHTARROW",
+    Control: "FIRE", " ": "USE", Shift: "SHIFT", Alt: "ALT", Tab: "TAB", Escape: "ESCAPE", Enter: "ENTER",
+    Backspace: "BACKSPACE", ",": "STRAFE_L", ".": "STRAFE_R", "<": "STRAFE_L", ">": "STRAFE_R" };
+
+  function doomKey(name, down) {
+    if (!doomRun || !doomRun.doom) return;
+    if (name === "QUIT") { if (down) closeDoomWindow(); return; }
+    const d = doomRun.doom;
+    let k = null;
+    if (name.length === 1) k = name.toLowerCase().charCodeAt(0);
+    else try { k = d.keyCode(name); } catch (_) {}
+    if (k != null) d.press(k, down);
+  }
+
+  async function openDoomWindow() {
+    if (doomRun) { doomUi.screen.focus({ preventScroll: true }); return; }
+    const run = ++doomRunId;
+    doomRun = { run, doom: null, timer: 0 };
+    doomUi.win.hidden = false;
+    doomUi.win.classList.remove("running");
+    doomUi.state.textContent = "loading…";
+    doomUi.screen.focus({ preventScroll: true });
+    const ctx = doomUi.canvas.getContext("2d");
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, doomUi.canvas.width, doomUi.canvas.height);
+    let image = null, pixels = null;
+    try {
+      await host.loadDoomModule((f) => { if (doomRun && doomRun.run === run) doomUi.state.textContent = `downloading ${Math.round(f * 100)}%`; });
+      if (!doomRun || doomRun.run !== run) return;
+      const doom = await host.startDoomInstance((bgra, w, h) => {
+        if (!image || image.width !== w || image.height !== h) {
+          doomUi.canvas.width = w; doomUi.canvas.height = h;
+          image = ctx.createImageData(w, h);
+          pixels = new Uint32Array(image.data.buffer);
+        }
+        // DOOM hands over BGRA; the canvas wants RGBA (and an opaque alpha).
+        const src = new Uint32Array(bgra.buffer, bgra.byteOffset, w * h);
+        for (let i = 0; i < src.length; i++) {
+          const v = src[i];
+          pixels[i] = 0xFF000000 | ((v & 0xFF) << 16) | (v & 0xFF00) | ((v >> 16) & 0xFF);
+        }
+        ctx.putImageData(image, 0, 0);
+      }, () => closeDoomWindow());
+      if (!doomRun || doomRun.run !== run) return;
+      doomRun.doom = doom;
+      doomUi.state.textContent = "running";
+      doomUi.win.classList.add("running");
+      doomRun.timer = setInterval(() => doom.tick(), 28);      // 35 tics a second
+    } catch (err) {
+      console.error(err);
+      if (doomRun && doomRun.run === run) doomUi.state.textContent = "couldn't load DOOM: " + (err.message || err);
+    }
+  }
+
+  function closeDoomWindow() {
+    if (!doomRun) return;
+    clearInterval(doomRun.timer);
+    doomRun = null;
+    doomUi.win.hidden = true;
+    doomUi.state.textContent = "closed";
+    for (const b of doomUi.pad.querySelectorAll(".held")) b.classList.remove("held");
+    if (emulator) ui.fit.focus({ preventScroll: true });
+  }
+
+  host.onWindow((what) => { if (what === "doom") openDoomWindow(); });
+  doomUi.close.addEventListener("click", closeDoomWindow);
+  doomUi.screen.addEventListener("pointerdown", () => doomUi.screen.focus({ preventScroll: true }));
+  for (const [type, down] of [["keydown", true], ["keyup", false]]) {
+    doomUi.win.addEventListener(type, (e) => {
+      if (e.target.closest("button")) return;
+      if (e.key === "F12") { e.preventDefault(); if (down) closeDoomWindow(); return; }
+      const name = DOOM_KEYS[e.key] || (e.key.length === 1 && /[a-z0-9\-=]/i.test(e.key) ? e.key : null);
+      if (!name) return;
+      e.preventDefault();
+      if (!(down && e.repeat)) doomKey(name, down);
+    });
+  }
+  doomUi.pad.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("[data-dk]");
+    if (!b) return;
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch (_) {}
+    b.classList.add("held");
+    doomKey(b.dataset.dk, true);
+  });
+  for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    doomUi.pad.addEventListener(t, (e) => {
+      const b = e.target.closest("[data-dk]");
+      if (b && b.classList.contains("held")) { b.classList.remove("held"); doomKey(b.dataset.dk, false); }
+    });
+  }
+  doomUi.pad.addEventListener("contextmenu", (e) => e.preventDefault());
 
   async function stopEmulator() {
+    closeDoomWindow();
     host.detach();
     if (!emulator) return;
     const old = emulator;
@@ -447,6 +417,15 @@
       ui.pkgPanel.classList.toggle("hidden", src.bundled !== "conmon" && kind !== "multiboot");
       if (kind === "fda" && src.buffer.byteLength > FLOPPY_MAX)
         throw new Error("That image is bigger than a 2.88 MB floppy. Boot it as a hard disk instead.");
+      if (kind === "fda" && src.buffer.byteLength < 1474560) {   // boot sectors -> a full 1.44 MB floppy
+        const padded = new Uint8Array(1474560);
+        padded.set(new Uint8Array(src.buffer));
+        src.buffer = padded.buffer;
+      }
+      const sampleInfo = src.bundled ? SAMPLES[src.bundled] : null;
+      ui.hint.textContent = sampleInfo && sampleInfo.hint ? sampleInfo.hint : "";
+      ui.hint.hidden = !ui.hint.textContent;
+      ui.keys.dataset.mode = src.bundled === "conmon" ? "conmon" : "guest";
 
       ui.name.textContent = `${src.name} · ${KIND_LABEL[kind]} · ${formatSize(src.buffer.byteLength)}`;
       setStatus("starting", "warn");

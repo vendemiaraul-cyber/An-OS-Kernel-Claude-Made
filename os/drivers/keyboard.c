@@ -5,6 +5,7 @@
 static volatile uint8_t buf[KBD_BUF];
 static volatile uint32_t head, tail;
 static int shift, caps, ctrl, extended;
+static volatile int raw;                    /* raw mode: queue scancodes as-is */
 
 static const char keymap[128] = {
     0, 27, '1','2','3','4','5','6','7','8','9','0','-','=','\b',
@@ -32,6 +33,8 @@ static void push(uint8_t c) {
 static void keyboard_irq(struct regs *r) {
     (void)r;
     uint8_t sc = inb(0x60);
+
+    if (raw) { push(sc); return; }          /* games want presses AND releases */
 
     if (sc == 0xE0) { extended = 1; return; }
 
@@ -77,6 +80,15 @@ int keyboard_poll(void) {
     uint8_t c = buf[tail];
     tail = (tail + 1) % KBD_BUF;
     return c;
+}
+
+void keyboard_set_raw(int on) {
+    irq_disable();
+    raw = on;
+    head = tail = 0;                        /* drop anything queued in the other mode */
+    extended = 0;
+    shift = ctrl = 0;
+    irq_enable();
 }
 
 int keyboard_peek(void) {

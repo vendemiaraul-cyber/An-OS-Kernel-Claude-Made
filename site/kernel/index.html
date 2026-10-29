@@ -60,7 +60,7 @@
     .keys button, .vm-keys button { min-width: 44px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: 13px var(--mono); cursor: pointer; touch-action: manipulation; }
     .keys button:active, .vm-keys button:active { background: #26303a; }
 
-    /* run v86: a second PC in a window over ConMon's screen */
+    /* Windows over the screen (the DOOM window MikeOS opens) */
     .vm-window { position: absolute; top: 56px; right: 18px; width: min(660px, calc(100% - 36px)); z-index: 20; background: #0d1014; border: 1px solid #3a4450; border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.7); display: flex; flex-direction: column; overflow: hidden; }
     .vm-window.focused { border-color: rgba(74,222,128,.6); }
     .vm-title { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; background: #161b21; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; touch-action: none; }
@@ -102,6 +102,28 @@
       .vm-type .field { font-size: 16px; }
       .vm-keys button { flex: 1 1 calc(20% - 6px); min-width: 0; min-height: 44px; }
     }
+    .doom-window .vm-title { cursor: default; }
+    .doom-screen { cursor: default; }
+    .doom-screen canvas { width: 100%; height: auto; aspect-ratio: 8 / 5; image-rendering: auto; }
+    .doom-pad { padding: 0 12px 12px; }
+    @media (max-width: 720px) { .doom-window { display: flex; } .doom-window[hidden] { display: none; } }
+    .screen-hint { margin: 8px 0 0; font-size: 13px; color: #a7f3c0; }
+    .game-pad { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-top: 10px; user-select: none; -webkit-user-select: none; touch-action: none; }
+    .game-pad[hidden], .keys[hidden] { display: none; }
+    .game-pad button { border: 1px solid #3a4450; background: #1a1f26; color: var(--text); border-radius: 10px; font: 700 13px var(--mono); cursor: pointer; touch-action: none; -webkit-tap-highlight-color: transparent; }
+    .game-pad button.held { background: #2f6b46; border-color: var(--accent); }
+    .pad-dir { display: grid; grid-template-columns: repeat(3, 54px); grid-template-rows: repeat(3, 46px); gap: 4px; flex: none; }
+    .pad-dir button { font-size: 18px; }
+    .pad-up { grid-column: 2; grid-row: 1; } .pad-left { grid-column: 1; grid-row: 2; }
+    .pad-right { grid-column: 3; grid-row: 2; } .pad-down { grid-column: 2; grid-row: 3; }
+    .pad-act { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; flex: 1; min-width: 0; }
+    .pad-act button { min-height: 44px; padding: 4px; font-size: 12px; }
+    .pad-fire { background: #5b1414 !important; border-color: #a33 !important; }
+    .pad-quit { color: var(--warn) !important; }
+    @media (max-width: 720px) { .game-pad { flex-direction: column; align-items: stretch; } .pad-dir { margin: 0 auto; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 52px); } .pad-act { grid-template-columns: repeat(5, 1fr); } }
+    .keys .guest-only { display: none; }
+    .keys[data-mode="guest"] .guest-only { display: inline-block; }
+    .keys[data-mode="guest"] [data-key="ctrlc"], .keys[data-mode="guest"] [data-key="ctrll"] { display: none; }
     .tips li { margin: 6px 0; }
     .tips { padding-left: 18px; margin: 0; color: var(--muted); font-size: 14px; }
     .tips b { color: var(--text); font-weight: 600; }
@@ -149,6 +171,7 @@
             </div>
           </div>
 
+          <p class="screen-hint" id="screen-hint" hidden></p>
           <form class="typebar" id="typebar" autocomplete="off">
             <input class="field" id="type-input" placeholder="Type a command and press Send (handy on phones)" enterkeyhint="send" autocapitalize="off" spellcheck="false">
             <button class="btn primary" type="submit">Send</button>
@@ -157,6 +180,58 @@
             <button data-key="esc">Esc</button><button data-key="tab">Tab</button>
             <button data-key="up" aria-label="Up, previous command">↑</button><button data-key="down" aria-label="Down">↓</button>
             <button data-key="ctrlc">Ctrl+C</button><button data-key="ctrll">Ctrl+L</button>
+            <button data-key="left" class="guest-only" aria-label="Left">←</button><button data-key="right" class="guest-only" aria-label="Right">→</button>
+            <button data-key="space" class="guest-only">Space</button><button data-key="enter" class="guest-only">Enter</button>
+          </div>
+          <div class="game-pad" id="game-pad" hidden aria-label="Game controls">
+            <div class="pad-dir">
+              <button data-sc="48" data-e0 class="pad-up" aria-label="Forward">▲</button>
+              <button data-sc="4b" data-e0 class="pad-left" aria-label="Turn left">◀</button>
+              <button data-sc="4d" data-e0 class="pad-right" aria-label="Turn right">▶</button>
+              <button data-sc="50" data-e0 class="pad-down" aria-label="Back">▼</button>
+            </div>
+            <div class="pad-act">
+              <button data-sc="1d" class="pad-fire">FIRE</button>
+              <button data-sc="39">USE</button>
+              <button data-sc="2a">RUN</button>
+              <button data-sc="33">◁ STRAFE</button>
+              <button data-sc="34">STRAFE ▷</button>
+              <button data-sc="0f">MAP</button>
+              <button data-sc="01">ESC</button>
+              <button data-sc="1c">ENTER</button>
+              <button data-sc="15">Y</button>
+              <button data-sc="58" class="pad-quit">QUIT</button>
+            </div>
+          </div>
+          <!-- DOOM in a window, opened by a guest (MikeOS's DOOM.BAS) over the serial port -->
+          <div class="vm-window doom-window" id="doom-window" hidden role="dialog" aria-label="DOOM">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">DOOM · opened from MikeOS</span>
+              <span class="vm-state" id="doom-state">loading…</span><span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="doom-close" aria-label="Close DOOM and go back">✕</button>
+            </div>
+            <div class="vm-screen doom-screen" id="doom-screen" tabindex="0" aria-label="DOOM screen. Click, then play with the keyboard."><canvas id="doom-canvas" width="640" height="400"></canvas></div>
+            <p class="vm-hint">Arrows move · Ctrl fire · Space use · Shift run · Enter menu · F12 or ✕ goes back to MikeOS.</p>
+            <div class="game-pad doom-pad" id="doom-pad" aria-label="DOOM controls">
+              <div class="pad-dir">
+                <button data-dk="UPARROW" class="pad-up" aria-label="Forward">▲</button>
+                <button data-dk="LEFTARROW" class="pad-left" aria-label="Turn left">◀</button>
+                <button data-dk="RIGHTARROW" class="pad-right" aria-label="Turn right">▶</button>
+                <button data-dk="DOWNARROW" class="pad-down" aria-label="Back">▼</button>
+              </div>
+              <div class="pad-act">
+                <button data-dk="FIRE" class="pad-fire">FIRE</button>
+                <button data-dk="USE">USE</button>
+                <button data-dk="SHIFT">RUN</button>
+                <button data-dk="STRAFE_L">◁ STRAFE</button>
+                <button data-dk="STRAFE_R">STRAFE ▷</button>
+                <button data-dk="TAB">MAP</button>
+                <button data-dk="ESCAPE">ESC</button>
+                <button data-dk="ENTER">ENTER</button>
+                <button data-dk="y">Y</button>
+                <button data-dk="QUIT" class="pad-quit">BACK</button>
+              </div>
+            </div>
           </div>
           <div class="chips" id="chips" aria-label="ConMon commands">
             <button class="chip" data-cmd="help">help</button>
@@ -168,13 +243,18 @@
             <button class="chip" data-cmd="uptime">uptime</button>
             <button class="chip" data-cmd="guess">guess</button>
             <button class="chip" data-cmd="crash">crash</button>
-            <button class="chip pkg" data-cmd="run v86">run v86</button>
+            <button class="chip pkg" data-cmd="install doom">install doom</button>
+            <button class="chip pkg" data-cmd="doom">doom</button>
+            <button class="chip pkg" data-cmd="install doomy">install doomy</button>
+            <button class="chip pkg" data-cmd="doomy">doomy</button>
             <button class="chip pkg" data-cmd="install llm">install llm</button>
             <button class="chip pkg" data-cmd="install llm all">install llm all</button>
             <button class="chip pkg" data-cmd="load">load</button>
             <button class="chip pkg" data-cmd="mp finder">mp finder</button>
             <button class="chip pkg" data-cmd="install solMeteo">install solMeteo</button>
             <button class="chip pkg" data-cmd="Rome">Rome</button>
+            <button class="chip pkg" data-cmd="Bologna">Bologna</button>
+            <button class="chip pkg" data-cmd="cities Italy">cities Italy</button>
           </div>
         </div>
 
@@ -196,15 +276,31 @@
             <button class="sample active" data-sample="conmon">
               <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 66 KB</span>
             </button>
+            <button class="sample" data-sample="mikeos">
+              <b>MikeOS 4.5</b><span>Floppy · a small OS with apps, BASIC, games and a DOOM launcher</span>
+            </button>
+            <button class="sample" data-sample="tetros">
+              <b>Tetros</b><span>Boot sector · Tetris in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="bootbasic">
+              <b>bootBASIC</b><span>Boot sector · a BASIC interpreter in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="bootos">
+              <b>bootOS</b><span>Boot sector · a whole OS with a file system in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="sectorlisp">
+              <b>SectorLISP</b><span>Boot sector · LISP in 512 bytes</span>
+            </button>
             <button class="sample" data-sample="hello">
-              <b>Hello boot sector</b><span>Floppy · 512 bytes of 16-bit real mode</span>
+              <b>Hello boot sector</b><span>Boot sector · ConMon Lab's own 16-bit demo</span>
             </button>
           </div>
+          <p class="muted small" style="margin:0">MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
         </div>
 
         <div class="panel" id="pkg-panel">
           <h2>Packages</h2>
-          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs AI models and fetches weather, then streams the results back into the OS.</p>
+          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs AI models and games, fetches weather, then streams the results back into the OS.</p>
           <div class="pkg-row"><span class="mono">llm</span><span class="pill" id="pkg-llm">not installed</span></div>
           <div class="muted small">Type <span class="mono">install llm</span>, pick a model by its letter, then <span class="mono">load</span> to chat. Four engines:</div>
           <ul class="tips small" style="margin:0">
@@ -216,7 +312,11 @@
           <div class="muted small"><span class="mono">install llm all</span> downloads every model at once. <span class="mono">mp finder</span> shows facts about each model, with live stats from Hugging Face or Ollama.</div>
           <div class="file-info"><span id="pkg-gpu">WebGPU: checking…</span> · <span id="pkg-model">no model loaded</span></div>
           <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>.</div>
+          <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>. Type <span class="mono">cities Italy</span> to browse the 2,582 built-in cities.</div>
+          <div class="pkg-row"><span class="mono">doom</span><span class="pill" id="pkg-doom">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install doom</span>, then <span class="mono">doom</span>: the real DOOM (shareware Episode 1) drawn on ConMon's text screen. Arrows move, Ctrl fires, Space opens doors, F12 (or QUIT) goes back. On a phone the game pad appears under the screen.</div>
+          <div class="pkg-row"><span class="mono">doomy</span><span class="pill" id="pkg-doomy">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install doomy</span>, then <span class="mono">doomy</span>: a small DOOM-style game written in Python, run in this page by <a href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a> (~10 MB download). On your PC: <a href="/doomy/doomy.py" download>download doomy.py</a> and run <span class="mono">python doomy.py</span> in a terminal.</div>
           <div class="file-info" id="pkg-busy" style="color:var(--accent)"></div>
         </div>
 

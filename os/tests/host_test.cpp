@@ -169,9 +169,8 @@ static void test_shell() {
     CHECK(contains(o, "No package named mp4"));
     CHECK(contains(o, "unknown command: play"));
     CHECK(contains(o, "unknown command: meteo"));     // only after install
-    o = run_shell("run\nrun v86\n");
-    CHECK(contains(o, "usage: run v86"));
-    CHECK(contains(o, "No host link found."));
+    o = run_shell("run v86\n");
+    CHECK(contains(o, "unknown command: run"));
 
     o = run_shell("reboot\n");
     CHECK(contains(o, "Rebooting"));

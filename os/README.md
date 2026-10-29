@@ -24,11 +24,11 @@ boot entry and interrupt stubs.
 | Shell | Line editor with history (↑/↓), Ctrl+C, Ctrl+L, quoted arguments, 22 commands | C++ |
 | RAM disk | Flat in-memory filesystem: `ls cat write append rm mv` | C++ |
 | Host link | Message protocol over COM1 (interrupt-driven receive) | C |
-| Packages | `install llm` adds `models`, `load` and `mp finder`; `install solMeteo` adds `meteo` | C++ |
+| Packages | `install llm` adds `models`, `load` and `mp finder`; `install solMeteo` adds `meteo`; `install doom` / `install doomy` add the games | C++ |
 
 Shell commands: `help clear echo about uptime mem cpu color calc ls cat write
-append rm mv history sleep beep guess crash reboot halt install run`, plus `models`,
-`load`, `mp` and `meteo` once their packages are installed.
+append rm mv history sleep beep guess crash reboot halt install`, plus `models`,
+`load`, `mp`, `meteo`, `doom` and `doomy` once their packages are installed.
 
 ## Packages and the host link
 
@@ -51,13 +51,16 @@ host -> ConMon:  STX <type> <len lo> <len hi> <payload>
 - `install solMeteo`: adds `meteo`. Type a place: ConMon clears the screen and
   the host draws full-screen frames: an ASCII world map built from GeoJSON
   country outlines flies to the place, then the current weather and a 3-day
-  forecast from Open-Meteo appear underneath. `exit` leaves.
+  forecast from Open-Meteo appear underneath. `cities Italy` lists the
+  built-in cities of a country. `exit` leaves.
+- `install doom`: adds `doom`. ConMon switches its keyboard driver to raw
+  mode and forwards every key press and release to the host, which runs DOOM
+  and sends back 80x50 "pixel" frames drawn with half-block characters,
+  using a 16-colour palette ConMon loads into the VGA DAC. F12 quits.
+- `install doomy`: adds `doomy`, the same idea with a small game written in
+  Python that the host runs with Pyodide.
 
-- `run v86`: lists other operating systems bundled with the site; type a
-  letter and the page opens a second emulator in a window (a full-screen
-  sheet on phones) while ConMon keeps running. `run v86 B` opens one directly.
-
-On QEMU or a real PC there is no host, and `install` and `run` say so.
+On QEMU or a real PC there is no host, and `install` says so.
 
 ## Build
 

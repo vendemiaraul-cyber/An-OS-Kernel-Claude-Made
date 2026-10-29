@@ -4,7 +4,8 @@
 //   install llm              chat with an AI model     -> adds `models`, `load`, `mp`
 //   install llm all          ...and download every model right away
 //   install solMeteo         live weather + ASCII map  -> adds `meteo`
-//   run v86 [letter]         open another OS in a window beside ConMon
+//   install doom             DOOM on the text screen   -> adds `doom`
+//   install doomy            a DOOM-style game in Python (Pyodide) -> adds `doomy`
 //
 // ConMon can't run a neural network or reach the internet itself, so
 // packages work through the host link (kernel/hostlink.c): ConMon Lab, the
@@ -16,7 +17,7 @@
 namespace {
 
 bool host_ok;
-bool llm_installed, meteo_installed;
+bool llm_installed, meteo_installed, doom_installed, doomy_installed;
 
 struct Model {
     char   letter;
@@ -190,6 +191,8 @@ void cmd_models(Shell &sh, const Args &a);
 void cmd_load(Shell &sh, const Args &a);
 void cmd_mp(Shell &sh, const Args &a);
 void cmd_meteo(Shell &sh, const Args &a);
+void cmd_doom(Shell &sh, const Args &a);
+void cmd_doomy(Shell &sh, const Args &a);
 
 void list_packages() {
     Color c(VGA_YELLOW);
@@ -199,6 +202,10 @@ void list_packages() {
             llm_installed ? "[installed]" : "");
     kprintf("  solMeteo   Live weather from Open-Meteo with an ASCII world map  %s\n",
             meteo_installed ? "[installed]" : "");
+    kprintf("  doom       DOOM (shareware Episode 1) on ConMon's text screen    %s\n",
+            doom_installed ? "[installed]" : "");
+    kprintf("  doomy      A DOOM-style game written in Python (runs in Pyodide)  %s\n",
+            doomy_installed ? "[installed]" : "");
     print("Usage: install <name>    e.g. install solMeteo\n"
           "       install llm all   installs llm and downloads every model\n");
 }
@@ -475,13 +482,29 @@ void show_place(const char *place) {
     }
 }
 
+// "cities" or "cities <country>": browse the built-in city list.
+bool is_cities(const char *text) {
+    return strncmp(lower(text).c_str(), "cities", 6) == 0 && (text[6] == 0 || text[6] == ' ');
+}
+
+void meteo_input(Shell &sh, const char *text) {
+    if (is_cities(text)) {
+        const char *arg = text + 6;
+        while (*arg == ' ') arg++;
+        host_job(sh, "meteo.cities", arg);
+    } else {
+        show_place(text);
+    }
+}
+
 void meteo_loop(Shell &sh, const char *first) {
-    if (first && *first) show_place(first);
-    else print("Type a place (a city, town or region). Empty line or exit to leave.\n");
+    if (first && *first) meteo_input(sh, first);
+    else print("Type a place (a city, town or region), or cities to browse the built-in list.\n"
+               "Empty line or exit to leave.\n");
     for (;;) {
         String place = sh.editor().read("location> ", false, 60);
         if (place.empty() || place == "exit" || place == "quit") { print("Bye from solMeteo!\n"); return; }
-        show_place(place.c_str());
+        meteo_input(sh, place.c_str());
     }
 }
 
@@ -491,86 +514,80 @@ void cmd_meteo(Shell &sh, const Args &a) {
     meteo_loop(sh, place.c_str());
 }
 
-// ---------------------------------------------------------------- run v86
+// ------------------------------------------------------------------- doom
 
-// Another operating system in a second emulator window on the page, while
-// ConMon keeps running. The host keeps the catalogue of bundled systems.
-struct Guest {
-    char   letter;
-    String id, label, kind, size, about;
-};
-Vector<Guest> guests;
-
-bool fetch_guests() {
-    hostlink_send("v86.list", "");
+// A game the host runs: ConMon sends raw key presses and releases out of the
+// serial port and draws the full-screen frames the host sends back ('A'
+// packets, half-block "pixels"). F12 returns to the shell.
+void play_hosted_game(const char *name, const char *start, const char *keys_msg, const char *stop) {
+    hostlink_send(start, "");
+    keyboard_set_raw(1);
+    vga_cursor_visible(0);
+    bool drew = false, ended = false;
+    String err;
     hl_packet p;
-    for (;;) {
-        bool cancelled;
-        if (!wait_packet(p, 10000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
-        if (p.type == 'E') { error("%s", reinterpret_cast<const char *>(p.data)); return false; }
-        if (p.type == 'L') break;
-    }
-    // One system per line: "A|id|label|kind|size|about"
-    guests.clear();
-    for (const char *d = reinterpret_cast<const char *>(p.data); *d;) {
-        Guest g;
-        g.letter = *d;
-        g.id    = field(d, 1);
-        g.label = field(d, 2);
-        g.kind  = field(d, 3);
-        g.size  = field(d, 4);
-        g.about = field(d, 5);
-        guests.push_back(kstd::move(g));
-        while (*d && *d != '\n') d++;
-        if (*d == '\n') d++;
-    }
-    return !guests.empty();
-}
-
-const Guest *find_guest(const char *text) {
-    char want = text[0];
-    if (want >= 'a' && want <= 'z') want = (char)(want - 32);
-    if (!text[0] || text[1]) return nullptr;
-    for (const auto &g : guests) if (g.letter == want) return &g;
-    return nullptr;
-}
-
-void cmd_run(Shell &sh, const Args &a) {
-    if (a.count() < 2 || lower(a[1]) != "v86") {
-        print("usage: run v86            choose an OS to open in a window\n"
-              "       run v86 <letter>   open one directly, e.g. run v86 A\n");
-        return;
-    }
-    if (!host_available()) { no_host(); return; }
-    if (!fetch_guests()) return;
-
-    String choice;
-    if (a.count() > 2) {
-        choice = a[2];
-    } else {
-        {
-            Color c(VGA_YELLOW);
-            print("Operating systems that open in a window (ConMon keeps running):\n");
+    uint32_t last = now_ms();
+    char keys[96];
+    while (!ended) {
+        // Forward every scancode, batched as hex pairs: "1d 9d e048"
+        int n = 0, k;
+        bool quit = false;
+        while ((k = keyboard_poll()) >= 0 && n < 90) {
+            if (k == 0x58) { quit = true; break; }            /* F12 pressed */
+            static const char hx[] = "0123456789abcdef";
+            keys[n++] = hx[(k >> 4) & 15];
+            keys[n++] = hx[k & 15];
         }
-        for (const auto &g : guests) {
-            {
-                Color c(VGA_LIGHT_CYAN);
-                kprintf("  %c  ", g.letter);
+        if (n) { keys[n] = 0; hostlink_send(keys_msg, keys); }
+        if (quit) { hostlink_send(stop, ""); break; }
+
+        if (hostlink_poll(&p)) {
+            last = now_ms();
+            if (p.type == 'A') {
+                draw_frame(p);
+                drew = true;
+                hostlink_send("game.ack", "");
+            } else if (p.type == 'Q' && p.len >= 48) {
+                vga_set_palette16(p.data);
+            } else if (p.type == 'X') {
+                ended = true;
+            } else if (p.type == 'E') {
+                err = reinterpret_cast<const char *>(p.data);
+                ended = true;
             }
-            Color c(VGA_WHITE);
-            kprintf("%-18s", g.label.c_str());
-            vga_set_color(VGA_DARK_GREY, VGA_BLACK);
-            kprintf(" %-8s %7s  ", g.kind.c_str(), g.size.c_str());
-            vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-            kprintf("%s\n", g.about.c_str());
+            continue;
         }
-        print("\n");
-        choice = sh.editor().read("Type a letter to open (Enter to skip): ", false, 2);
-        if (choice.empty()) { print("Nothing opened.\n"); return; }
+        if (now_ms() - last > (drew ? 8000u : 30000u)) { err = "The game stopped sending frames."; break; }
+        cpu_halt();
     }
-    const Guest *g = find_guest(choice.c_str());
-    if (!g) { error("No system with letter %s. Type run v86 to see the list.", choice.c_str()); return; }
-    host_job(sh, "v86.open", g->id.c_str());
+    keyboard_set_raw(0);
+    vga_reset_palette();
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    vga_clear();
+    vga_cursor_visible(1);
+    if (!err.empty()) {
+        String msg = name;
+        msg += ": ";
+        msg += err;
+        error("%s", msg.c_str());
+    }
+    else kprintf("Back in ConMon. Type %s to play again.\n", name);
+}
+
+void cmd_doom(Shell &, const Args &) {
+    if (!host_available()) { no_host(); return; }
+    play_hosted_game("doom", "doom.start", "doom.k", "doom.stop");
+}
+
+void cmd_doomy(Shell &, const Args &) {
+    if (!host_available()) { no_host(); return; }
+    play_hosted_game("doomy", "doomy.start", "doomy.k", "doomy.stop");
+}
+
+void doom_controls() {
+    print("  Arrows move and turn    Ctrl fire    Space open doors    Shift run\n"
+          "  Alt+arrows or , . strafe    1-7 weapons    Tab map    Esc menu\n"
+          "  F12 goes back to ConMon. On a phone, use the DOOM pad under the screen.\n");
 }
 
 // ---------------------------------------------------------------- install
@@ -580,8 +597,40 @@ void cmd_install(Shell &sh, const Args &a) {
     String name = lower(a[1]);
     bool llm = name == "llm";
     bool meteo = name == "solmeteo" || name == "meteo";
-    if (!llm && !meteo) { error("No package named %s. Type install to see the list.", a[1]); return; }
+    bool doom = name == "doom";
+    bool doomy = name == "doomy";
+    if (!llm && !meteo && !doom && !doomy) { error("No package named %s. Type install to see the list.", a[1]); return; }
     if (!host_available()) { no_host(); return; }
+
+    if (doomy) {
+        if (!host_job(sh, "pkg.install", "doomy")) return;
+        doomy_installed = true;
+        if (!sh.has("doomy"))
+            sh.add(new FnCommand("doomy", "doomy", "play doomy, the Python game (F12 quits)", cmd_doomy));
+        {
+            Color c(VGA_LIGHT_GREEN);
+            print("Installed doomy. ");
+        }
+        print("New command: doomy. A DOOM-style game written in Python.\n"
+              "  Arrows or WASD move and turn   Q/E strafe   Ctrl or Space fire\n"
+              "  Shift run   Enter start   F12 back to ConMon\n");
+        return;
+    }
+
+    if (doom) {
+        if (!host_job(sh, "pkg.install", "doom")) return;
+        doom_installed = true;
+        if (!sh.has("doom"))
+            sh.add(new FnCommand("doom", "doom", "play DOOM (doom package; F12 quits)", cmd_doom));
+        {
+            Color c(VGA_LIGHT_GREEN);
+            print("Installed doom. ");
+        }
+        print("New command: doom. Controls:\n");
+        doom_controls();
+        print("Type doom to play.\n");
+        return;
+    }
 
     if (meteo) {
         if (!host_job(sh, "pkg.install", "solmeteo")) return;
@@ -621,8 +670,7 @@ void cmd_install(Shell &sh, const Args &a) {
 } // namespace
 
 void packages_register(Shell &sh) {
-    sh.add(new FnCommand("install", "install <llm|solMeteo>", "install a package", cmd_install));
-    sh.add(new FnCommand("run", "run v86 [letter]", "open another OS in a window", cmd_run));
+    sh.add(new FnCommand("install", "install <package>", "install llm, solMeteo, doom or doomy", cmd_install));
 }
 
 // Handles messages the host sends on its own while the shell waits for input.

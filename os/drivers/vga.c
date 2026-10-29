@@ -59,6 +59,26 @@ void vga_init(void) {
     vga_clear();
 }
 
+/* Text mode colours 0-15 go through the attribute controller to these DAC
+ * entries (the standard EGA mapping), so reprogramming them recolours the
+ * whole screen. Values are 6-bit (0-63) RGB triples. */
+static const uint8_t dac_index[16] = { 0, 1, 2, 3, 4, 5, 20, 7, 56, 57, 58, 59, 60, 61, 62, 63 };
+static const uint8_t default_rgb[48] = {
+     0, 0, 0,   0, 0,42,   0,42, 0,   0,42,42,  42, 0, 0,  42, 0,42,  42,21, 0,  42,42,42,
+    21,21,21,  21,21,63,  21,63,21,  21,63,63,  63,21,21,  63,21,63,  63,63,21,  63,63,63,
+};
+
+void vga_set_palette16(const uint8_t *rgb) {
+    for (int i = 0; i < 16; i++) {
+        outb(0x3C8, dac_index[i]);
+        outb(0x3C9, rgb[i * 3] & 63);
+        outb(0x3C9, rgb[i * 3 + 1] & 63);
+        outb(0x3C9, rgb[i * 3 + 2] & 63);
+    }
+}
+
+void vga_reset_palette(void) { vga_set_palette16(default_rgb); }
+
 void vga_set_cursor(int x, int y) {
     if (x < 0) x = 0;
     if (y < 0) y = 0;

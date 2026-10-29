@@ -40,40 +40,14 @@
     ["Phi-3.5-mini-instruct", "Phi 3.5 mini"],
     ["Qwen3-4B", "Qwen3 4B (best answers)"],
   ];
-  // Systems for `run v86`: small, permissively licensed images bundled with
-  // the site (see /guests/SOURCES.txt), opened in a second emulator window.
-  const GUESTS = [
-    { id: "mikeos", label: "MikeOS 4.5", kind: "floppy", file: "/guests/mikeos.flp", size: "1.4 MB",
-      about: "Small OS with apps, BASIC, games", hint: "Press Enter for the program menu, or Esc for the command line.",
-      credit: "MikeOS Developers, BSD-3-Clause" },
-    { id: "tetros", label: "Tetros", kind: "floppy", file: "/guests/tetros.img", size: "512 B",
-      about: "Tetris in a 512-byte boot sector", hint: "Left and right move, Up rotates, Down drops.",
-      credit: "daniel-e, MIT" },
-    { id: "bootbasic", label: "bootBASIC", kind: "floppy", file: "/guests/bootbasic.img", size: "512 B",
-      about: "BASIC interpreter in 512 bytes", hint: "Lowercase only. Try: 10 print 6*7 then run",
-      credit: "Oscar Toledo G., BSD-2-Clause" },
-    { id: "bootos", label: "bootOS", kind: "floppy", file: "/guests/bootos.img", size: "512 B",
-      about: "A whole OS in one boot sector", hint: "Type format first (it sets up the disk), then dir.",
-      credit: "Oscar Toledo G., BSD-2-Clause" },
-    { id: "sectorlisp", label: "SectorLISP", kind: "floppy", file: "/guests/sectorlisp.img", size: "512 B",
-      about: "LISP in a 512-byte boot sector", hint: "Use capitals. Try: (CONS (QUOTE X) (QUOTE Y))",
-      credit: "Justine Tunney and Alain Greppin, ISC" },
-    { id: "hello", label: "Hello boot sector", kind: "floppy", file: "/kernels/hello-floppy.img", size: "512 B",
-      about: "ConMon Lab's own 512-byte demo", hint: "Type anything and it echoes back.",
-      credit: "ConMon Lab" },
-    { id: "conmon", label: "ConMon (again)", kind: "kernel", file: "/kernels/conmon.bin", size: "65 KB",
-      about: "A second ConMon, inside ConMon", hint: "A complete second ConMon. Try help or guess.",
-      credit: "ConMon Lab" },
-  ];
-  let guestOpener = null, guestOpen = null;
-
   const SYSTEM_PROMPT =
     "You are a helpful assistant running inside ConMon, a tiny hobby operating system " +
     "shown on an 80-column text screen. Answer in plain text without markdown, " +
     "tables or emoji. Keep answers short unless asked for detail.";
   let emu = null;
   let onState = () => {};
-  const state = { meteo: false, llm: false, gpu: "unknown", model: null, modelLabel: "", busy: "" };
+  let onWindow = null;
+  const state = { meteo: false, llm: false, doom: false, doomy: false, game: "", gpu: "unknown", model: null, modelLabel: "", busy: "" };
 
   // ------------------------------------------------------------ framing
 
@@ -133,6 +107,8 @@
         case "hello": sendText("H", "ConMon Lab 1"); break;
         case "pkg.install":
           if (arg === "solmeteo") await installMeteo();
+          else if (arg === "doom") await installDoom();
+          else if (arg === "doomy") await installDoomy();
           else if (arg === "llm") await installLlm();
           else sendText("E", `Unknown package ${arg}`);
           break;
@@ -144,8 +120,14 @@
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
         case "llm.info": await modelInfo(arg); break;
         case "meteo.show": await showMeteo(arg); break;
-        case "v86.list": listGuests(); break;
-        case "v86.open": await openGuest(arg); break;
+        case "meteo.cities": await listCities(arg); break;
+        case "doom.start": await startDoom(); break;
+        case "doomy.start": await startDoomy(); break;
+        case "doom.k": case "doomy.k": gameKeys(arg); break;
+        case "doom.stop": case "doomy.stop": stopGame(null); break;
+        case "game.ack": game.acked = true; break;
+        // A guest OS (MikeOS's DOOM.BAS) asks the page to open a window.
+        case "window.doom": if (onWindow) onWindow("doom"); break;
         case "meteo.stop": meteoRun++; setBusy(""); break;
         default: break;
       }
@@ -727,6 +709,8 @@
   // Frames go to ConMon as 'A' packets: <rows> byte, rows*80 chars, rows*80 attrs.
 
   const GEOJSON_URL = "/meteo/countries.geo.json";
+  const CITIES_URL = "/meteo/cities.json";        // Natural Earth populated places
+  let cityList = null;                            // [[name, country, region, lat, lon, population]]
   const GEO_API = "https://geocoding-api.open-meteo.com/v1/search";
   const WX_API = "https://api.open-meteo.com/v1/forecast";
   const ROWS = 22, MAP_TOP = 1, MAP_ROWS = 13, PANEL = MAP_TOP + MAP_ROWS;
@@ -915,8 +899,61 @@
     else put(scr, ROWS - 1, 2, "Weather data: Open-Meteo.com (CC BY 4.0) · Places: GeoNames", 0x08);
   }
 
+  async function loadCities() {
+    if (!cityList) {
+      const res = await fetch(CITIES_URL);
+      if (!res.ok) throw new Error("Couldn't load the city list.");
+      cityList = (await res.json()).cities;
+    }
+    return cityList;
+  }
+
+  const fold = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Offline place search over the built-in list: "Name" or "Name, Country".
+  async function offlineGeocode(text) {
+    const list = await loadCities();
+    const [rawName, rawCountry] = String(text).split(",");
+    const name = fold(rawName), country = fold(rawCountry);
+    const inCountry = (c) => !country || fold(c[1]).startsWith(country);
+    const hit = list.find((c) => fold(c[0]) === name && inCountry(c))
+      || list.find((c) => fold(c[0]).startsWith(name) && inCountry(c))
+      || (name.length >= 4 && list.find((c) => fold(c[0]).includes(name) && inCountry(c)));
+    if (!hit) {
+      throw new Error(`"${text}" isn't in the ${list.length} built-in cities. Type cities to browse them` + (PREVIEW ? "; your site can look up any place." : "."));
+    }
+    const offset = Math.round(hit[4] / 15);
+    return { name: hit[0], admin1: hit[2], country: hit[1], lat: hit[3], lon: hit[4], tzOffset: offset };
+  }
+
+  // `cities` and `cities <country>` at solMeteo's location prompt.
+  async function listCities(arg) {
+    const list = await loadCities();
+    const want = fold(arg);
+    if (!want) {
+      const counts = new Map();
+      for (const c of list) counts.set(c[1], (counts.get(c[1]) || 0) + 1);
+      const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 24);
+      sendText("M", `${list.length} built-in cities in ${counts.size} countries. Most covered:`);
+      for (let i = 0; i < top.length; i += 3) {
+        sendText("M", top.slice(i, i + 3).map(([n, k]) => `  ${(n.slice(0, 18) + " " + k).padEnd(24)}`).join(""));
+      }
+      sendText("M", "Type cities <country>, e.g. cities Italy. Any place works when online.");
+      send("D", "");
+      return;
+    }
+    const country = [...new Set(list.map((c) => c[1]))].find((n) => fold(n) === want) || [...new Set(list.map((c) => c[1]))].find((n) => fold(n).startsWith(want));
+    if (!country) throw new Error(`No country called "${arg}" in the list. Type cities to see them.`);
+    const rows = list.filter((c) => c[1] === country);
+    sendText("M", `${country}: ${rows.length} cities, biggest first`);
+    const names = rows.slice(0, 80).map((c) => c[0].slice(0, 18).padEnd(19));
+    for (let i = 0; i < names.length; i += 4) sendText("M", "  " + names.slice(i, i + 4).join(""));
+    if (rows.length > 80) sendText("M", `  ...and ${rows.length - 80} more.`);
+    send("D", "");
+  }
+
   async function geocode(name) {
-    if (PREVIEW) return PREVIEW.geocode(name);
+    if (PREVIEW) return offlineGeocode(name);
     const url = `${GEO_API}?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
     let res;
     try { res = await fetch(url, { signal: AbortSignal.timeout(10000) }); } catch (_) {
@@ -1011,33 +1048,276 @@
     send("D", "solmeteo");
   }
 
-  // ------------------------------------------------------------ run v86
+  // -------------------------------------------------------------- games
+  //
+  // `doom` and `doomy` run here in the page; ConMon is the screen and the
+  // keyboard. ConMon sends raw scancodes ("doom.k;1de048"), and gets back
+  // 80x50 "pixel" frames drawn with the upper-half-block character: each text
+  // cell shows two pixels (foreground = top, background = bottom). A 'Q'
+  // packet first loads a 16-colour palette tuned to the game.
 
-  function listGuests() {
-    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    sendText("L", GUESTS.map((g, i) => `${letters[i]}|${g.id}|${g.label}|${g.kind}|${g.size}|${g.about.slice(0, 36)}`).join("\n"));
+  const DOOM_URL = "/doom/doom.wasm";
+  // 12 colours found by k-means over real DOOM frames, plus black, blood
+  // red, HUD yellow, menu white and armour green.
+  const DOOM_PALETTE = [
+    [0, 0, 0], [15, 15, 27], [28, 28, 26], [38, 38, 35], [121, 1, 1], [53, 53, 42], [67, 69, 64], [93, 66, 41],
+    [200, 20, 20], [97, 84, 71], [98, 100, 95], [133, 109, 87], [211, 191, 126], [255, 215, 70], [205, 205, 195], [40, 110, 40],
+  ];
+  const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v / 16 - 0.5) * 22);
+  // Set-1 scancode -> character, for cheats, Y/N prompts and weapon numbers.
+  const SC_CHARS = { 0x02: "1", 0x03: "2", 0x04: "3", 0x05: "4", 0x06: "5", 0x07: "6", 0x08: "7", 0x09: "8", 0x0A: "9", 0x0B: "0",
+    0x0C: "-", 0x0D: "=", 0x10: "q", 0x11: "w", 0x12: "e", 0x13: "r", 0x14: "t", 0x15: "y", 0x16: "u", 0x17: "i", 0x18: "o",
+    0x19: "p", 0x1E: "a", 0x1F: "s", 0x20: "d", 0x21: "f", 0x22: "g", 0x23: "h", 0x24: "j", 0x25: "k", 0x26: "l",
+    0x2C: "z", 0x2D: "x", 0x2E: "c", 0x2F: "v", 0x30: "b", 0x31: "n", 0x32: "m", 0x33: ",", 0x34: ".", 0x35: "/" };
+
+  const game = { name: "", timer: 0, acked: true, ackWait: 0, lastSend: 0, frame: null, key: null, stop: null, e0: false };
+  let doomModule = null;
+
+  function paletteLUT(pal) {
+    const lut = new Uint8Array(32768);
+    for (let i = 0; i < 32768; i++) {
+      const r = ((i >> 10) & 31) * 8.2, g = ((i >> 5) & 31) * 8.2, b = (i & 31) * 8.2;
+      let best = 0, bd = Infinity;
+      for (let c = 0; c < pal.length; c++) {
+        const p = pal[c], d = (r - p[0]) ** 2 * 0.3 + (g - p[1]) ** 2 * 0.59 + (b - p[2]) ** 2 * 0.11;
+        if (d < bd) { bd = d; best = c; }
+      }
+      lut[i] = best;
+    }
+    return lut;
   }
 
-  async function openGuest(id) {
-    const g = GUESTS.find((x) => x.id === id);
-    if (!g) throw new Error("That system isn't in the list.");
-    if (!guestOpener) throw new Error("This page can't open windows.");
-    const replaced = guestOpen && guestOpen.id !== g.id ? guestOpen.label : "";
-    await guestOpener(g);
-    guestOpen = g;
-    if (replaced) sendText("M", `Closed ${replaced} to make room.`);
-    sendText("M", `Opened ${g.label} in a window. ConMon keeps running here.`);
-    sendText("M", `Tip: ${g.hint}`);
-    sendText("M", `(${g.credit})`);
-    send("D", "");
+  function sendPalette(pal) {
+    const q = new Uint8Array(48);
+    pal.forEach((c, i) => { q[i * 3] = c[0] >> 2; q[i * 3 + 1] = c[1] >> 2; q[i * 3 + 2] = c[2] >> 2; });
+    send("Q", q);
   }
 
-  // Called by the page when the user closes the window.
-  function guestClosed() {
-    if (!guestOpen) return;
-    const label = guestOpen.label;
-    guestOpen = null;
-    sendText("M", `${label} window closed.`);
+  // 80x50 palette indices -> one 25-row text frame of half blocks.
+  function sendIndexed(px) {
+    const out = new Uint8Array(1 + 25 * 160);
+    out[0] = 25;
+    for (let row = 0; row < 25; row++) {
+      for (let x = 0; x < 80; x++) {
+        const i = row * 80 + x, top = px[row * 160 + x], bottom = px[row * 160 + 80 + x];
+        out[1 + i] = 0xDF;                               // upper half block
+        out[1 + 2000 + i] = (bottom << 4) | top;
+      }
+    }
+    send("A", out);
+  }
+
+  function pumpGame() {
+    if (!game.frame) return;
+    const now = performance.now();
+    if (!game.acked && now - game.ackWait > 1500) game.acked = true;    // never stall for good
+    if (!game.acked || now - game.lastSend < 66) return;               // ~15 frames a second
+    const px = game.frame();
+    if (!px) return;
+    sendIndexed(px);
+    game.acked = false;
+    game.ackWait = game.lastSend = now;
+  }
+
+  function stopGame(message) {
+    clearInterval(game.timer);
+    const wasRunning = !!game.name;
+    if (game.stop) try { game.stop(); } catch (_) {}
+    Object.assign(game, { name: "", timer: 0, frame: null, key: null, stop: null, acked: true, e0: false });
+    state.game = "";
+    setBusy("");
+    if (wasRunning && message !== null) {
+      if (message) sendText("M", message);
+      send("X", "");
+    }
+  }
+
+  // "1de048e0c89d" -> key events for the running game.
+  function gameKeys(hex) {
+    if (!game.key) return;
+    for (let i = 0; i + 1 < hex.length; i += 2) {
+      const b = parseInt(hex.slice(i, i + 2), 16);
+      if (b === 0xE0) { game.e0 = true; continue; }
+      game.key(b & 0x7F, !(b & 0x80), game.e0);
+      game.e0 = false;
+    }
+  }
+
+  async function loadDoomModule(onProgress) {
+    if (doomModule) return doomModule;
+    const blob = await fetchWithProgress(DOOM_URL, onProgress || (() => {}));
+    doomModule = await WebAssembly.compile(await blob.arrayBuffer());
+    return doomModule;
+  }
+
+  async function installDoom() {
+    cancelled = false;
+    setBusy("installing doom");
+    progress(0, "Downloading DOOM (4.6 MB)");
+    await loadDoomModule((f) => progress(f * 95, "Downloading DOOM (4.6 MB)"));
+    progress(100, "DOOM engine ready");
+    state.doom = true;
+    setBusy("");
+    send("D", "doom");
+  }
+
+  // Starts a DOOM instance. `draw(rgbaBGRA, width, height)` gets every frame.
+  async function startDoomInstance(draw, onQuit) {
+    const module = await loadDoomModule();
+    let mem = null, W = 0, H = 0, quit = false;
+    const imports = {
+      loading: { onGameInit: (w, h) => { W = w; H = h; }, wadSizes: () => {}, readWads: () => {} },
+      ui: { drawFrame: (ptr) => draw(new Uint8Array(mem.buffer, ptr, W * H * 4), W, H) },
+      runtimeControl: { timeInMilliseconds: () => BigInt(Math.trunc(performance.now())) },
+      console: { onInfoMessage: () => {}, onErrorMessage: (p, l) => console.warn("[DOOM]", new TextDecoder().decode(new Uint8Array(mem.buffer, p, l))) },
+      gameSaving: { sizeOfSaveGame: () => 0, readSaveGame: () => 0, writeSaveGame: () => 0 },
+    };
+    const instance = await WebAssembly.instantiate(module, imports);
+    const e = instance.exports;
+    mem = e.memory;
+    e.initGame();
+    const keyFor = (code, ext) => {
+      switch (code) {
+        case 0x48: return e.KEY_UPARROW.value;
+        case 0x50: return e.KEY_DOWNARROW.value;
+        case 0x4B: return e.KEY_LEFTARROW.value;
+        case 0x4D: return e.KEY_RIGHTARROW.value;
+        case 0x1D: return e.KEY_FIRE.value;
+        case 0x39: return e.KEY_USE.value;
+        case 0x2A: case 0x36: return e.KEY_SHIFT.value;
+        case 0x38: return e.KEY_ALT.value;
+        case 0x0F: return e.KEY_TAB.value;
+        case 0x01: return e.KEY_ESCAPE.value;
+        case 0x1C: return e.KEY_ENTER.value;
+        case 0x0E: return e.KEY_BACKSPACE.value;
+        case 0x33: return e.KEY_STRAFE_L.value;
+        case 0x34: return e.KEY_STRAFE_R.value;
+        default: return SC_CHARS[code] ? SC_CHARS[code].charCodeAt(0) : null;
+      }
+    };
+    return {
+      tick() {
+        if (quit) return false;
+        try { e.tickGame(); return true; } catch (err) { quit = true; if (onQuit) onQuit(err); return false; }
+      },
+      key(code, down, ext) {
+        const k = keyFor(code, ext);
+        if (k == null) return;
+        try { if (down) e.reportKeyDown(k); else e.reportKeyUp(k); } catch (_) {}
+      },
+      keyCode: (name) => e["KEY_" + name].value,
+      press(k, down) { try { if (down) e.reportKeyDown(k); else e.reportKeyUp(k); } catch (_) {} },
+    };
+  }
+
+  async function startDoom() {
+    stopGame(null);
+    setBusy("loading DOOM");
+    const lut = paletteLUT(DOOM_PALETTE);
+    let latest = null, W = 0, H = 0;
+    const doom = await startDoomInstance((rgba, w, h) => { latest = rgba; W = w; H = h; },
+      () => stopGame("DOOM has quit."));
+    sendPalette(DOOM_PALETTE);
+    const px = new Uint8Array(80 * 50);
+    Object.assign(game, {
+      name: "doom", acked: true, lastSend: 0,
+      key: (code, down, ext) => doom.key(code, down, ext),
+      frame() {
+        if (!latest || !W) return null;
+        const bw = W / 80, bh = H / 50;
+        for (let y = 0; y < 50; y++) {
+          for (let x = 0; x < 80; x++) {
+            // Average four samples per block. Pixels are BGRA in memory.
+            let r = 0, g = 0, b = 0;
+            for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
+              const i = ((Math.floor(y * bh + (sy + 0.5) * bh / 2)) * W + Math.floor(x * bw + (sx + 0.5) * bw / 2)) * 4;
+              b += latest[i]; g += latest[i + 1]; r += latest[i + 2];
+            }
+            // A little brighter than the original: chunky pixels read darker.
+            const d = BAYER4[(y & 3) * 4 + (x & 3)], k = 1.25 / 4;
+            const R = Math.max(0, Math.min(255, r * k + d)) >> 3, G = Math.max(0, Math.min(255, g * k + d)) >> 3, B = Math.max(0, Math.min(255, b * k + d)) >> 3;
+            px[y * 80 + x] = lut[(R << 10) | (G << 5) | B];
+          }
+        }
+        return px;
+      },
+    });
+    state.game = "doom";
+    setBusy("playing DOOM");
+    game.timer = setInterval(() => {
+      if (!doom.tick()) return;
+      pumpGame();
+    }, 28);                                                 // DOOM runs at 35 tics a second
+  }
+
+  // -------------------------------------------------------------- doomy
+  //
+  // doomy is a small DOOM-style game written in Python (/doomy/doomy.py).
+  // Pyodide, Python compiled to WebAssembly, runs it right in this page.
+
+  const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.6/full/";
+  const DOOMY_URL = "/doomy/doomy.py";
+  let pyodide = null;
+  const DOOMY_KEYS = { 0x48: "up", 0x50: "down", 0x4B: "left", 0x4D: "right", 0x11: "up", 0x1F: "down", 0x1E: "left",
+    0x20: "right", 0x10: "strafe_l", 0x12: "strafe_r", 0x33: "strafe_l", 0x34: "strafe_r", 0x1D: "fire", 0x39: "fire",
+    0x21: "fire", 0x2A: "run", 0x36: "run", 0x1C: "enter", 0x15: "enter" };
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("Couldn't download Python (Pyodide). Check your internet connection."));
+      document.head.append(s);
+    });
+  }
+
+  async function installDoomy() {
+    if (PREVIEW) {
+      throw new Error("doomy needs internet to download Python (Pyodide, about 10 MB), so it only runs on your site. You can also run doomy.py on your PC: python doomy.py");
+    }
+    setBusy("installing doomy");
+    if (!pyodide) {
+      progress(5, "Downloading Python (Pyodide, ~10 MB)");
+      if (!window.loadPyodide) await loadScript(PYODIDE_URL + "pyodide.js");
+      progress(35, "Starting Python");
+      pyodide = await window.loadPyodide({ indexURL: PYODIDE_URL });
+    }
+    progress(85, "Loading doomy.py");
+    const res = await fetch(DOOMY_URL);
+    if (!res.ok) throw new Error("Couldn't load doomy.py.");
+    pyodide.runPython(await res.text());
+    progress(100, "doomy ready (Python " + pyodide.runPython("import sys; sys.version.split()[0]") + ")");
+    state.doomy = true;
+    setBusy("");
+    send("D", "doomy");
+  }
+
+  async function startDoomy() {
+    if (!pyodide || !state.doomy) throw new Error("Type install doomy first.");
+    stopGame(null);
+    const g = pyodide.runPython("Doomy()");
+    const palProxy = pyodide.globals.get("PALETTE");
+    const pal = palProxy.toJs();
+    if (palProxy.destroy) palProxy.destroy();
+    sendPalette(pal);
+    let last = performance.now();
+    Object.assign(game, {
+      name: "doomy", acked: true, lastSend: 0,
+      key(code, down) { const k = DOOMY_KEYS[code]; if (k) g.key(k, down); },
+      frame() {
+        const now = performance.now();
+        const out = g.step((now - last) / 1000);
+        last = now;
+        const px = out && out.toJs ? out.toJs() : out;
+        if (out && out.destroy) out.destroy();
+        return px;
+      },
+      stop() { if (g.destroy) g.destroy(); },
+    });
+    state.game = "doomy";
+    setBusy("playing doomy");
+    game.timer = setInterval(pumpGame, 33);
   }
 
   // ------------------------------------------------------------ public
@@ -1048,18 +1328,21 @@
       emitText = textSink;
       mode = 0; frame = "";
       meteoRun++;
+      stopGame(null);
       state.meteo = false; state.llm = false;   // a fresh ConMon has nothing installed
+      state.doom = false; state.doomy = false;
       state.model = null; state.modelLabel = "";
       history = [];
       onState(state);
     },
-    detach() { meteoRun++; emu = null; },
+    detach() { meteoRun++; stopGame(null); emu = null; },
+    startDoomInstance,
+    loadDoomModule,
     onByte,
     checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
+    onWindow(fn) { onWindow = fn; },
     get state() { return state; },
-    onGuestOpen(fn) { guestOpener = fn; },
-    guestClosed,
     // test hooks: let automated tests swap in fake engines
     _setWebLLM(mod) { webllm = mod; },
     _setTransformers(mod) { tfjs = mod; },

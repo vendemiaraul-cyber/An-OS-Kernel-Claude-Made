@@ -46,6 +46,9 @@ void serial_putc_raw(char c) { (void)c; }
 void vga_put_at(char c, uint8_t col, int x, int y) { (void)c; (void)col; (void)x; (void)y; }
 void vga_cursor_visible(int on) { (void)on; }
 void vga_set_cursor(int x, int y) { (void)x; (void)y; }
+void vga_set_palette16(const uint8_t *rgb) { (void)rgb; }
+void vga_reset_palette(void) {}
+void keyboard_set_raw(int on) { (void)on; }
 
 int keyboard_getchar(void) {
     if (!test_keys || !*test_keys) longjmp(test_done, 1);

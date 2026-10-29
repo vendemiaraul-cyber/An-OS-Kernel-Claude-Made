@@ -16,13 +16,18 @@ OUT = os.path.join(ROOT, "preview", "out")
 # base64-encoded inside images.js instead of as .bin/.img files.
 FILES = {
     "v86/libv86.js": "v86/libv86.js", "v86/v86.wasm": "v86/v86.wasm",
-    "meteo/countries.geo.json": "meteo/countries.geo.json",
+    "meteo/countries.geo.json": "meteo/countries.geo.json", "meteo/cities.json": "meteo/cities.json",
     "kernel/smartestchild.js": "kernel/smartestchild.js", "kernel/hostlink.js": "kernel/hostlink.js",
+    "doom/doom.wasm": "doom/doom.wasm", "doom/LICENSE-GPL-2.0.txt": "doom/LICENSE-GPL-2.0.txt", "doom/SOURCE.txt": "doom/SOURCE.txt",
+    "doomy/doomy.py.txt": "doomy/doomy.py",
 }
+for _f in os.listdir(os.path.join(SITE, "guests")):
+    if _f.endswith(".txt"):
+        FILES["guests/" + _f] = "guests/" + _f
 
 
 def write_images():
-    """Packs every binary the page boots (BIOS, ConMon, run v86 guests) into
+    """Packs every binary the page boots (BIOS, ConMon, the bundled guests) into
     images.js. Trailing zero bytes are dropped and restored on decode."""
     import base64
     files = {
@@ -64,7 +69,7 @@ def main():
         shutil.copyfile(os.path.join(SITE, src), os.path.join(OUT, dst))
 
     # Absolute paths -> relative ones.
-    hl = open(os.path.join(OUT, "kernel/hostlink.js")).read().replace('"/meteo/countries.geo.json"', '"meteo/countries.geo.json"')
+    hl = open(os.path.join(OUT, "kernel/hostlink.js")).read().replace('"/meteo/', '"meteo/').replace('"/doom/', '"doom/').replace('"/doomy/', '"doomy/')
     open(os.path.join(OUT, "kernel/hostlink.js"), "w").write(hl)
     kj = open(os.path.join(SITE, "kernel/kernel.js")).read()
     for a in ["/kernels/", "/v86/"]:
@@ -89,13 +94,15 @@ def main():
     head_styles = "".join(re.findall(r"<style>.*?</style>", head, re.S))
     fonts = "\n".join(l.strip() for l in head.splitlines() if "fonts.g" in l)
 
+    body = body.replace('href="/guests/', 'href="guests/').replace('href="/doomy/doomy.py" download', 'href="doomy/doomy.py.txt" download="doomy.py"')
     body = re.sub(r'<nav class="nav">.*?</nav>', '<span class="badge" style="margin-left:auto"><span class="led"></span>preview</span>', body, flags=re.S)
     body = body.replace('<a class="brand" href="/">', '<span class="brand">').replace('ConMon<span class="full">&nbsp;Lab</span></a>', 'ConMon<span class="full">&nbsp;Lab</span></span>')
     body = re.sub(r'<footer class="wrap footer">.*?</footer>', '<footer class="wrap footer">ConMon Lab preview. The full site, with the YouTube Test app, lives on your Netlify deploy.</footer>', body, flags=re.S)
     note = ('<div class="preview-note"><b>Preview mode.</b> This copy runs without internet, so the AI chat offers '
-            'SmartestChild only, and solMeteo shows <b>sample</b> weather for 47 big cities (try Rome, Tokyo, New York). '
-            'Everything else is the real ConMon, including <b>run v86</b>, which opens MikeOS, Tetros and more in a window. '
-            'On your Netlify site, Transformers.js, WebLLM, Ollama, live Open-Meteo weather and mp finder\'s live stats all work.</div>')
+            'SmartestChild only, and solMeteo shows <b>sample</b> weather for 2,582 built-in cities (try Rome, Bologna, Tokyo, or cities Italy). '
+            'Everything else is the real thing: boot MikeOS, Tetros and more from the list, <b>install doom</b> plays real DOOM on ConMon\'s screen, '
+            'and MikeOS\'s DOOM.BAS opens DOOM in a window. '
+            'On your Netlify site, doomy (Python via Pyodide), Transformers.js, WebLLM, Ollama, live Open-Meteo weather and mp finder\'s live stats also work.</div>')
     body = body.replace("</p>\n    </section>", "</p>\n      " + note + "\n    </section>", 1)
     scripts = ('<script src="preview-data.js"></script>\n  <script src="images.js"></script>\n  <script src="v86/libv86.js"></script>\n'
                '  <script src="kernel/smartestchild.js"></script>\n  <script src="kernel/hostlink.js"></script>\n'

@@ -1,7 +1,12 @@
-Guest operating systems for 'run v86' (all permissively licensed):
+Bundled guest operating systems in Kernel Lab (all permissively licensed):
 
 mikeos.flp  https://github.com/mig-hub/mikeOS  commit 685306a  licence BSD-3-Clause (LICENSE-*.txt)
 tetros.img  https://github.com/daniel-e/tetros  commit 924f0d7  licence MIT (LICENSE-*.txt)
 bootbasic.img  https://github.com/nanochess/bootBASIC  commit b2eba2b  licence BSD-2-Clause (LICENSE-*.txt)
 bootos.img  https://github.com/nanochess/bootOS  commit e54fffe  licence BSD-2-Clause (LICENSE-*.txt)
 sectorlisp.img  https://github.com/jart/sectorlisp  commit 162c845  licence ISC (LICENSE-*.txt)
+
+Change: mikeos.flp also holds DOOM.BAS (ConMon Lab, MIT), a MikeOS BASIC
+program that asks the page to open DOOM in a window. Its source is
+tools/doom.bas in the ConMon Lab repo; tools/fat12_add.py puts it on the floppy:
+    python3 tools/fat12_add.py site/guests/mikeos.flp tools/doom.bas DOOM.BAS

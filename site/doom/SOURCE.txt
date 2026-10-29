@@ -1,0 +1,9 @@
+doom.wasm: the DOOM engine (id Software's 1997 GPL source release, via
+doomgeneric) compiled to WebAssembly by github.com/jacobenget/doom.wasm,
+licence GPL-2.0 (LICENSE-GPL-2.0.txt). Built module taken from that
+project's gh-pages branch, commit 25ea598859a7dba4e2f86ea0354d583e1b3f5ecd.
+Source code: https://github.com/jacobenget/doom.wasm
+
+The module includes the DOOM shareware episode (DOOM1.WAD, "Knee-Deep in the
+Dead"), which id Software allows to be shared for free in unmodified form.
+The full commercial DOOM game data is not included.

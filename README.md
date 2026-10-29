@@ -7,10 +7,16 @@ A Netlify site with two apps:
   You can also load your own Multiboot kernel, floppy image, ISO or disk image.
   Inside ConMon, `install llm` adds an AI chat (SmartestChild, Transformers.js,
   WebLLM or Ollama) plus `mp finder` for model facts, and `install solMeteo`
-  adds live weather from Open-Meteo with an animated ASCII world map.
-  `run v86` opens another OS (MikeOS, Tetros, bootBASIC, bootOS, SectorLISP,
-  or a second ConMon) in a window while ConMon keeps running. The page does
-  the work and streams the results into ConMon over its serial port.
+  adds live weather from Open-Meteo for any place (2,582 cities built in, for
+  offline use and `cities Italy`-style browsing) with an animated ASCII world map.
+  `install doom` plays the real DOOM (shareware Episode 1) on ConMon's text
+  screen; `install doomy` plays doomy, a small DOOM-style game written in
+  Python, run in the browser by Pyodide. The page does the work and streams
+  the results into ConMon over its serial port.
+  The **Bundled kernels** list also boots MikeOS, Tetros, bootBASIC, bootOS and
+  SectorLISP on the main screen. MikeOS has a `DOOM.BAS` program at the top
+  of its menu: it can't run DOOM itself (it's 16-bit), so it asks the page,
+  over the serial port, to open DOOM in a window.
 - **YouTube Test** (`/youtube/`): search, trending, video stats and an embedded
   player through the **YouTube Data API v3**, with a request log for testing.
   The API key stays on the server inside a Netlify Function.
@@ -20,15 +26,19 @@ site/                      static site Netlify publishes
   index.html               landing page
   kernel/                  Kernel Lab (index.html + kernel.js)
   youtube/                 YouTube Test (index.html + youtube.js)
-  kernel/hostlink.js       host side of ConMon's packages (llm, solMeteo)
+  kernel/hostlink.js       host side of ConMon's packages (llm, solMeteo, doom, doomy)
   kernel/smartestchild.js  the built-in SmartestChild chatbot
   kernels/                 bundled images: conmon.bin, hello-floppy.img
-  meteo/                   world countries GeoJSON for the solMeteo map (public domain)
-  guests/                  OS images for `run v86`, with their licences (SOURCES.txt)
+  meteo/                   countries GeoJSON + cities.json for solMeteo (public domain)
+  doom/                    doom.wasm (DOOM engine + shareware WAD, GPL-2.0)
+  doomy/                   doomy.py, the Python game (also runs in a terminal)
+  guests/                  bundled OS images, with their licences (SOURCES.txt)
   v86/                     emulator (libv86.js, v86.wasm) + SeaBIOS/VGA BIOS
 netlify/functions/
   youtube.mjs              /api/youtube proxy that adds YOUTUBE_API_KEY
 os/                        ConMon source (C, C++, NASM) - see os/README.md
+tools/                     doom.bas (MikeOS DOOM launcher), fat12_add.py
+preview/                   builds the offline preview (python3 preview/build.py)
 netlify.toml
 ```
 
@@ -76,6 +86,17 @@ make samples       # rebuilds samples/hello-floppy.img
 cp conmon.bin ../site/kernels/conmon.bin
 ```
 
+## doomy on your PC
+
+`site/doomy/doomy.py` needs only Python 3 (no packages). In a terminal with
+colour support (Windows Terminal is fine on a Lenovo or any Windows PC):
+
+```sh
+python doomy.py
+```
+
+Arrows or WASD move, Q/E strafe, Space fires, Enter starts, Esc quits.
+
 ## AI models (install llm)
 
 Models come from WebLLM's catalogue and download from Hugging Face the first
@@ -92,7 +113,14 @@ size and GPU features fit the device.
   (`site/meteo/LICENSE-countries-geojson.txt`), derived from Natural Earth.
 - Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0, free
   for non-commercial use); place search based on GeoNames.
-- `run v86` systems: MikeOS (BSD-3-Clause), Tetros (MIT), bootBASIC and bootOS
+- Cities: Natural Earth populated places, public domain (`site/meteo/LICENSE-natural-earth.txt`).
+- Bundled systems: MikeOS (BSD-3-Clause), Tetros (MIT), bootBASIC and bootOS
   by Oscar Toledo G. (BSD-2-Clause), SectorLISP (ISC). See `site/guests/`.
+  The MikeOS floppy adds DOOM.BAS (`tools/doom.bas`).
+- DOOM: doom.wasm from jacobenget/doom.wasm, a WebAssembly port of id
+  Software's DOOM source, GPL-2.0, with the freely distributable shareware
+  DOOM1.WAD inside (`site/doom/`). DOOM is a trademark of id Software.
+- Pyodide (MPL-2.0), loaded from the jsDelivr CDN when you `install doomy`.
+  doomy itself is ConMon Lab's own code (MIT).
 - WebLLM by the MLC team, Apache-2.0, loaded from the esm.run CDN at runtime.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.

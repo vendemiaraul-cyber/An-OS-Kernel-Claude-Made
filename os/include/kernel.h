@@ -66,6 +66,8 @@ uint8_t vga_get_color(void);
 void    vga_put_at(char c, uint8_t color, int x, int y);
 void    vga_cursor_visible(int on);
 void    vga_set_cursor(int x, int y);       /* where the next character goes */
+void    vga_set_palette16(const uint8_t *rgb);  /* 16 x (r,g,b), 0-63 each */
+void    vga_reset_palette(void);
 void    vga_disable_blink(void);        /* attribute bit 7 = bright background */
 
 /* ---------- serial port COM1 (drivers/serial.c) ---------- */
@@ -127,6 +129,7 @@ void keyboard_init(void);
 int  keyboard_getchar(void);            /* blocks until a key is pressed */
 int  keyboard_poll(void);               /* -1 if no key waiting */
 int  keyboard_peek(void);               /* like poll, but leaves the key queued */
+void keyboard_set_raw(int on);          /* 1: queue raw scancodes (games)  */
 
 /* ---------- kernel heap (mm/kheap.c) ---------- */
 void   kheap_init(uintptr_t start, size_t size);
