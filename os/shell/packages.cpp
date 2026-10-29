@@ -300,10 +300,9 @@ void cmd_models(Shell &sh, const Args &) {
 void chat(Shell &sh) {
     {
         Color c(VGA_YELLOW);
-        kprintf("Talking to %s. ", ready_label.c_str());
+        kprintf("Talking to %s.\n", ready_label.c_str());
     }
-    print("Type exit to leave, reset for a new conversation.\n"
-          "Ctrl+C stops a long answer.\n\n");
+    print("Type exit to leave, reset for a new conversation. Ctrl+C stops an answer.\n\n");
     for (;;) {
         String line = sh.editor().read("you> ", false, 300);
         if (line.empty()) continue;
