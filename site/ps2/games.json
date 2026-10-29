@@ -9,12 +9,21 @@
       "source": "https://github.com/glampert/quake2-for-ps2",
       "licence": "GPL-2.0",
       "elf": "games/quake2/quake2.elf",
-      "files": { "baseq2/config.cfg": "games/quake2/config.cfg" },
+      "files": {
+        "baseq2/config.cfg": "games/quake2/config.cfg"
+      },
       "needs": {
         "path": "baseq2/pak0.pak",
         "what": "pak0.pak from your Quake II (Steam or GOG, baseq2 folder, 175 MB)",
         "magic": "PACK",
-        "minBytes": 1000000
+        "minBytes": 1000000,
+        "optional": true
+      },
+      "demo": {
+        "path": "baseq2/pak0.pak",
+        "url": "games/quake2/baseq2/pak0.pak",
+        "label": "the free Quake II demo (3 levels, 50 MB)",
+        "source": "https://github.com/drags/docker-quake2"
       }
     }
   ]

@@ -29,8 +29,10 @@ make release CONFIG_DEFS='-DPS2_QUAKE_DEBUG=0 -DPS2_QUAKE_ASSERTS=0 -DPS2_QUAKE_
 cp build/release/quake2.elf ../site/ps2/games/quake2/
 ```
 
-The game data (`baseq2/pak0.pak`) is the player's own: the page asks for it
-once and keeps it in the browser's private storage (OPFS).
+`baseq2/pak0.pak` next to it is the free Quake II demo (49,951,322 bytes,
+SHA-1 b86e8878a8e8706595ceebe88b3e6b4c1ba5bcab; maps demo1-3), from
+github.com/drags/docker-quake2. A player who owns Quake II can pick the full
+game's pak0.pak on the page instead; it is kept in the browser (OPFS).
 
 ## Adding a game
 

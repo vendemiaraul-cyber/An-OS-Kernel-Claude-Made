@@ -386,7 +386,8 @@
     ps2.game = g;
     ps2.name.textContent = "PS2 · " + g.name;
     ps2.about.textContent = g.name + ": " + g.by + " (" + g.licence + ").";
-    ps2.needs.textContent = g.needs ? "Needs " + g.needs.what + ". You pick it once on the game's page; it stays in this browser." : "";
+    ps2.needs.textContent = g.demo ? "Plays " + g.demo.label + ". Own Quake II? Pick its pak0.pak on the game's page for the full game."
+      : g.needs ? "Needs " + g.needs.what + ". You pick it once on the game's page; it stays in this browser." : "";
     ps2.win.hidden = false;
   }
   $("ps2-close").addEventListener("click", () => { ps2.win.hidden = true; ui.fit.focus({ preventScroll: true }); });

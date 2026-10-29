@@ -185,11 +185,14 @@ async function start() {
     const elfName = game.elf.split("/").pop();
     writeFile(Module.FS, `${host}/${elfName}`, elf);
     for (const [to, bytes] of Object.entries(extra)) writeFile(Module.FS, `${host}/${to}`, bytes);
-    if (game.needs) {
+    if (game.needs && data) {
       status(`Reading ${storedName()} (${(data.size / 1048576).toFixed(0)} MB)…`);
       bar(0.55);
       writeFile(Module.FS, `${host}/${game.needs.path}`, new Uint8Array(await data.arrayBuffer()));
       data = null;              // the emulator's copy is the one that counts now
+    } else if (game.demo) {
+      status("Downloading " + game.demo.label + "…");
+      writeFile(Module.FS, `${host}/${game.demo.path}`, await fetchBytes(game.demo.url, (f) => bar(0.5 + f * 0.5)));
     }
     bar(1);
     status("Booting…");
@@ -248,7 +251,8 @@ for (const b of ui.pad.querySelectorAll("button")) {
   ui.name.textContent = game.name;
   ui.about.innerHTML = "";
   ui.about.append(game.by + " · ", Object.assign(document.createElement("a"), { href: game.source, target: "_blank", rel: "noopener", textContent: "source" }), " · " + game.licence);
-  ui.credit.textContent = `${game.name}: ${game.by} (${game.licence}).`;
+  ui.credit.textContent = `${game.name}: ${game.by} (${game.licence}).` +
+    (game.demo ? " The demo data is id Software's freely distributable Quake II demo." : "");
 
   // GitHub Pages can't send the isolation headers: a service worker adds
   // them (coi-sw.js), then the page reloads once under it.
@@ -275,13 +279,18 @@ for (const b of ui.pad.querySelectorAll("button")) {
 
   if (game.needs) {
     ui.need.hidden = false;
-    ui.needText.textContent = "This game needs " + game.needs.what + ". It stays in this browser; nothing is uploaded.";
-    ui.pick.textContent = "Choose " + storedName();
+    ui.needText.textContent = game.demo
+      ? `Plays ${game.demo.label}. For the whole game, choose ${game.needs.what}; it stays in this browser and nothing is uploaded.`
+      : "This game needs " + game.needs.what + ". It stays in this browser; nothing is uploaded.";
+    ui.pick.textContent = (game.demo ? "Full game: choose " : "Choose ") + storedName();
     const stored = await loadStored();
     if (stored && !(await checkData(stored))) {
       data = stored;
       ui.forget.hidden = false;
-      showHave(`Found ${storedName()} saved in this browser (${(stored.size / 1048576).toFixed(0)} MB).`);
+      showHave(`Found your ${storedName()} saved in this browser (${(stored.size / 1048576).toFixed(0)} MB): the full game.`);
+      status("Ready. Tap Start.");
+    } else if (game.demo) {
+      showHave("Using " + game.demo.label + ".");
       status("Ready. Tap Start.");
     } else {
       status(`Choose ${storedName()} to continue.`);

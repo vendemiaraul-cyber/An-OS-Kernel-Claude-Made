@@ -162,9 +162,12 @@ tab next to it.
 - **A: Quake II** — glampert's fan-made PS2 port of id Software's Quake II
   ([glampert/quake2-for-ps2](https://github.com/glampert/quake2-for-ps2),
   GPL-2.0), built with the free ps2dev SDK (`site/ps2/games/quake2.elf`).
-  It needs Quake II's game data, `baseq2/pak0.pak` (about 175 MB) from your
-  own copy of Quake II (Steam or GOG), which can't be included. Pick it once;
-  the page keeps it in this browser's private storage for next time.
+  It plays the free **Quake II demo** (3 levels, `site/ps2/games/quake2/baseq2/pak0.pak`,
+  50 MB, id Software's freely distributable demo data, taken from
+  [drags/docker-quake2](https://github.com/drags/docker-quake2)). For the
+  whole game, pick `baseq2/pak0.pak` (about 175 MB) from your own copy of
+  Quake II (Steam or GOG) on the game's page; it is kept in this browser's
+  private storage and used instead of the demo.
 
 PS2 emulation is heavy: a recent PC runs it best; phones are slow. Controls:
 arrows (D-pad), T F G H (left stick), I J K L (look), Z (X / fire), X
@@ -212,6 +215,7 @@ arrows (D-pad), T F G H (left stick), I J K L (look), Z (X / fire), X
 - Play! PS2 emulator by Jean-Philip Desjardins and contributors, BSD-2-Clause
   (`site/ps2/emu/LICENSE-Play.txt`), commit in `tools/ps2/PLAY_COMMIT`.
 - Quake II for the PS2 by Guilherme R. Lampert, on id Software's Quake II
-  source, GPL-2.0 (`site/ps2/games/`). Quake II is a trademark of id Software;
-  its game data is not included.
+  source, GPL-2.0 (`site/ps2/games/`). Quake II is a trademark of id Software.
+  The bundled data is the freely distributable Quake II demo (© id Software);
+  the full game's data is not included.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.

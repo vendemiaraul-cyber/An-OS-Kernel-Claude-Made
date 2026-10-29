@@ -193,7 +193,8 @@
     const lines = ["PS2 games (run in Play!, the open-source PS2 emulator):"];
     for (const g of games) {
       lines.push(`  ${g.letter}  ${g.name.padEnd(12)} ${g.by}`);
-      if (g.needs) lines.push(`     needs ${g.needs.what}`);
+      if (g.demo) lines.push("     free demo included (3 levels); your own pak0.pak gives the full game");
+      else if (g.needs) lines.push(`     needs ${g.needs.what}`);
     }
     lines.push("Type run game <letter> to play, e.g. run game A");
     return lines;
