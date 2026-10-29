@@ -1,9 +1,10 @@
 // ConMon Lab - host link.
 //
 // ConMon talks to this page over its serial port (COM1). This file is the
-// "host" side: it installs packages, decodes MP4 video into VGA text-mode
-// frames, and runs language models (SmartestChild, Transformers.js, WebLLM or
-// Ollama), then streams the results back into the OS.
+// "host" side: it installs packages, runs language models (SmartestChild,
+// Transformers.js, WebLLM or Ollama), looks up model info, and fetches weather
+// from Open-Meteo with an animated ASCII map, then streams it all back into
+// the OS.
 //
 //   ConMon -> host:  ESC ] "CM;" <type> ";" <payload> BEL
 //   host -> ConMon:  STX <type> <len lo> <len hi> <payload bytes>
@@ -20,12 +21,6 @@
     ["onnx-community/Qwen2.5-0.5B-Instruct", "Qwen2.5 0.5B", 400],
     ["onnx-community/Qwen3-0.6B-ONNX", "Qwen3 0.6B (best answers)", 570],
   ];
-  const VIDEOS = {
-    ep1: { file: "/videos/ConMon-1-booting-up.mp4", title: "Episode 1: Booting up", name: "ep1.mp4" },
-    ep2: { file: "/videos/ConMon-2-the-shell.mp4", title: "Episode 2: The shell", name: "ep2.mp4" },
-    ep3: { file: "/videos/ConMon-3-files-in-ram.mp4", title: "Episode 3: Files in RAM", name: "ep3.mp4" },
-    ep4: { file: "/videos/ConMon-4-hardware-and-crashes.mp4", title: "Episode 4: Hardware and crashes", name: "ep4.mp4" },
-  };
   // Model families offered, smallest first. The best quantisation that this
   // device supports is picked from WebLLM's own model list at runtime.
   const FAMILIES = [
@@ -46,18 +41,9 @@
     "You are a helpful assistant running inside ConMon, a tiny hobby operating system " +
     "shown on an 80-column text screen. Answer in plain text without markdown, " +
     "tables or emoji. Keep answers short unless asked for detail.";
-  const VGA = [
-    [0, 0, 0], [0, 0, 170], [0, 170, 0], [0, 170, 170], [170, 0, 0], [170, 0, 170], [170, 85, 0], [170, 170, 170],
-    [85, 85, 85], [85, 85, 255], [85, 255, 85], [85, 255, 255], [255, 85, 85], [255, 85, 255], [255, 255, 85], [255, 255, 255],
-  ];
-  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v / 16 - 0.5) * 48);
-
   let emu = null;
   let onState = () => {};
-  const state = { mp4: false, llm: false, gpu: "unknown", model: null, busy: "" };
-  const blobs = {};                     // video id -> object URL (prefetched)
-  const userVideos = {};                // id -> { url, title, name }
-  let userCount = 0;
+  const state = { meteo: false, llm: false, gpu: "unknown", model: null, modelLabel: "", busy: "" };
 
   // ------------------------------------------------------------ framing
 
@@ -116,7 +102,7 @@
       switch (type) {
         case "hello": sendText("H", "ConMon Lab 1"); break;
         case "pkg.install":
-          if (arg === "mp4") await installMp4();
+          if (arg === "solmeteo") await installMeteo();
           else if (arg === "llm") await installLlm();
           else sendText("E", `Unknown package ${arg}`);
           break;
@@ -126,10 +112,9 @@
         case "llm.chat": await chat(arg); break;
         case "llm.stop": stopGeneration(); break;
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
-        case "mp4.play": await playVideo(arg); break;
-        case "mp4.ack": player.acked = true; break;
-        case "mp4.stop": stopVideo(); break;
-        case "mp4.pause": togglePause(); break;
+        case "llm.info": await modelInfo(arg); break;
+        case "meteo.show": await showMeteo(arg); break;
+        case "meteo.stop": meteoRun++; setBusy(""); break;
         default: break;
       }
     } catch (err) {
@@ -139,7 +124,7 @@
     }
   }
 
-  // ---------------------------------------------------------------- mp4
+  // ------------------------------------------------------------ downloads
 
   let cancelled = false;
 
@@ -158,169 +143,7 @@
       parts.push(value); got += value.length;
       onProgress(got / total);
     }
-    return new Blob(parts, { type: res.headers.get("content-type") || "video/mp4" });
-  }
-
-  function describe(v, meta) {
-    return `${v.name}\nMP4 video (streamed from ConMon Lab)\nid: ${meta.id}\ntitle: ${v.title}\nlength: ${meta.length}\nsize: ${meta.size}\n`;
-  }
-
-  function fmtTime(s) {
-    s = Math.max(0, Math.floor(s || 0));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }
-
-  function duration(url) {
-    return new Promise((resolve) => {
-      const v = document.createElement("video");
-      v.preload = "metadata";
-      v.onloadedmetadata = () => resolve(v.duration);
-      v.onerror = () => resolve(0);
-      v.src = url;
-    });
-  }
-
-  async function installMp4() {
-    cancelled = false;
-    setBusy("installing mp4");
-    progress(0, "Checking the video decoder");
-    const probe = document.createElement("video");
-    if (!probe.canPlayType('video/mp4; codecs="avc1.42E01E"')) {
-      sendText("E", "This browser can't decode MP4 (H.264) video.");
-      setBusy("");
-      return;
-    }
-    const ids = Object.keys(VIDEOS);
-    for (let n = 0; n < ids.length; n++) {
-      const id = ids[n], v = VIDEOS[id];
-      if (!blobs[id]) {
-        const blob = await fetchWithProgress(v.file, (f) => progress(((n + f) / ids.length) * 100, `Downloading ${v.name}`));
-        blobs[id] = { url: URL.createObjectURL(blob), size: blob.size };
-      }
-      const len = await duration(blobs[id].url);
-      progress(((n + 1) / ids.length) * 100, `Installed ${v.name}`);
-      sendText("W", describe(v, { id, length: fmtTime(len), size: Math.round(blobs[id].size / 1024) + " KB" }));
-    }
-    state.mp4 = true;
-    setBusy("");
-    send("D", "mp4");
-  }
-
-  // Lets the page hand ConMon a video the user picked (after install mp4).
-  async function addUserVideo(file) {
-    if (!emu || !state.mp4) return false;
-    const id = "user" + (++userCount);
-    let base = file.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 20) || "video";
-    const name = base + ".mp4";
-    const url = URL.createObjectURL(file);
-    userVideos[id] = { url, title: file.name, name };
-    const len = await duration(url);
-    sendText("W", describe({ name, title: file.name }, { id, length: fmtTime(len), size: Math.round(file.size / 1024) + " KB" }));
-    return name;
-  }
-
-  const player = { video: null, timer: 0, acked: true, name: "", paused: false, canvas: null, ctx: null };
-
-  async function playVideo(id) {
-    stopVideo(true);
-    const src = blobs[id] ? blobs[id].url : (userVideos[id] ? userVideos[id].url : (VIDEOS[id] ? VIDEOS[id].file : null));
-    if (!src) { sendText("E", "That video isn't available any more. Run install mp4 again."); return; }
-    const v = document.createElement("video");
-    v.muted = true;
-    v.playsInline = true;
-    v.preload = "auto";
-    v.src = src;
-    player.video = v;
-    player.name = (VIDEOS[id] || userVideos[id] || { name: id }).name;
-    player.paused = false;
-    player.acked = true;
-    if (!player.canvas) {
-      player.canvas = document.createElement("canvas");
-      player.canvas.width = 80; player.canvas.height = 48;
-      player.ctx = player.canvas.getContext("2d", { willReadFrequently: true });
-    }
-    v.addEventListener("ended", () => { finishVideo(); });
-    try { await v.play(); } catch (e) { sendText("E", "The browser refused to play the video."); return; }
-    setBusy("playing " + player.name);
-    player.timer = setInterval(tick, 1000 / 12);
-  }
-
-  function tick() {
-    const v = player.video;
-    if (!v || !player.acked || v.readyState < 2) return;
-    send("F", frameBytes(v));
-    send("S", statusLine(v));             // raw: keeps the CP437 play symbol
-    player.acked = false;
-  }
-
-  function statusLine(v) {
-    const icon = player.paused ? "||" : "\x10";
-    let s = ` ${icon} ${player.name}   ${fmtTime(v.currentTime)} / ${fmtTime(v.duration)}`;
-    const keys = "q quit   space pause ";
-    s = s.padEnd(80 - keys.length) + keys;
-    return s.slice(0, 80);
-  }
-
-  // Draws the frame at 80x48 "pixels": each text cell shows two of them
-  // with the upper-half-block character (fg = top, bg = bottom).
-  function frameBytes(v) {
-    const ctx = player.ctx, W = 80, H = 48;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, W, H);
-    const ar = (v.videoWidth / v.videoHeight) || 16 / 9;
-    // Cells are about 8x16 px, so each half-cell pixel is roughly square.
-    let w = W, h = Math.round(W / ar);
-    if (h > H) { h = H; w = Math.round(H * ar); }
-    ctx.drawImage(v, Math.floor((W - w) / 2), Math.floor((H - h) / 2), w, h);
-    const px = ctx.getImageData(0, 0, W, H).data;
-    const out = new Uint8Array(W * 24);
-    for (let row = 0; row < 24; row++) {
-      for (let x = 0; x < W; x++) {
-        const top = nearest(px, x, row * 2), bottom = nearest(px, x, row * 2 + 1);
-        out[row * W + x] = (bottom << 4) | top;
-      }
-    }
-    return out;
-  }
-
-  function nearest(px, x, y) {
-    const i = (y * 80 + x) * 4, d = BAYER[(y & 3) * 4 + (x & 3)];
-    const r = px[i] + d, g = px[i + 1] + d, b = px[i + 2] + d;
-    let best = 0, bestDist = Infinity;
-    for (let c = 0; c < 16; c++) {
-      const p = VGA[c];
-      const dr = r - p[0], dg = g - p[1], db = b - p[2];
-      const dist = dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11;
-      if (dist < bestDist) { bestDist = dist; best = c; }
-    }
-    return best;
-  }
-
-  function togglePause() {
-    const v = player.video;
-    if (!v) return;
-    player.paused = !player.paused;
-    if (player.paused) v.pause(); else v.play();
-    send("S", statusLine(v));
-  }
-
-  function finishVideo() {
-    if (!player.video) return;
-    stopVideo(true);
-    send("X", "");
-  }
-
-  function stopVideo(silent) {
-    clearInterval(player.timer);
-    player.timer = 0;
-    if (player.video) {
-      player.video.pause();
-      player.video.removeAttribute("src");
-      player.video.load();
-      player.video = null;
-      if (!silent) send("X", "");
-    }
-    setBusy("");
+    return new Blob(parts, { type: res.headers.get("content-type") || "application/octet-stream" });
   }
 
   // ---------------------------------------------------------------- llm
@@ -436,8 +259,8 @@
   }
 
   let lastModels = [];
-  async function listModels() {
-    setBusy("checking models");
+  // Builds the model list across engines. Setup hints go to notes.
+  async function gatherModels(notes = []) {
     const adapter = await gpuAdapter();
     const groups = [];
 
@@ -457,10 +280,10 @@
         const w = await webllmModels(adapter);
         if (w.length) groups.push({ engine: "WebLLM - in this tab on your GPU, fastest", models: w });
       } catch (err) {
-        sendText("M", "WebLLM: couldn't load its model list (" + (err.message || err) + ").");
+        notes.push("WebLLM: couldn't load its model list (" + (err.message || err) + ").");
       }
     } else {
-      sendText("M", "WebLLM: needs WebGPU (Chrome or Edge on a computer), so it's hidden here.");
+      notes.push("WebLLM: needs WebGPU (Chrome or Edge on a computer), so it's hidden here.");
     }
 
     try {
@@ -473,10 +296,10 @@
           status: "on your PC",
         })) });
       } else {
-        sendText("M", "Ollama: running, but no models yet. On your PC run: ollama pull llama3.2");
+        notes.push("Ollama: running, but no models yet. On your PC run: ollama pull llama3.2");
       }
     } catch (_) {
-      sendText("M", ollamaHelp().join("\n"));
+      notes.push(...ollamaHelp());
     }
 
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -489,6 +312,14 @@
         lastModels.push(m);
       }
     }
+    return lines;
+  }
+
+  async function listModels() {
+    setBusy("checking models");
+    const notes = [];
+    const lines = await gatherModels(notes);
+    for (const n of notes) sendText("M", n);
     setBusy("");
     sendText("L", lines.join("\n"));
   }
@@ -666,6 +497,466 @@
     send("X", "");
   }
 
+  // ---------------------------------------------------------- mp finder
+  //
+  // `mp finder` in ConMon: an overview of every model, or one model's card.
+  // Curated facts are merged with live data from Hugging Face (downloads,
+  // likes, licence, last update) or from Ollama's /api/show on the user's PC.
+
+  const CATALOG = [
+    { re: /^smartest:/, maker: "ConMon Lab", params: "rules", context: "remembers your name",
+      good: "jokes, quick math, the time and ConMon facts",
+      about: "A retro rule-based chatbot. No neural network: it matches patterns, like the messenger bots of the early 2000s." },
+    { re: /LFM2/i, maker: "Liquid AI", good: "fast, short answers on small devices",
+      about: "A compact model family designed to run well on phones and laptops." },
+    { re: /SmolLM2/i, maker: "Hugging Face", context: "8K tokens", license: "apache-2.0",
+      good: "small talk, simple questions, rewriting text",
+      about: "A family of small open models trained by Hugging Face to run on-device." },
+    { re: /Qwen3/i, maker: "Alibaba (Qwen team)", context: "32K tokens", license: "apache-2.0",
+      good: "step-by-step reasoning, many languages, some coding",
+      about: "Can 'think' before answering; ConMon switches that off so replies come faster." },
+    { re: /Qwen2\.5/i, maker: "Alibaba (Qwen team)", context: "32K tokens", license: "apache-2.0",
+      good: "general questions, many languages, a little coding",
+      about: "A widely used open model family that is strong for its size." },
+    { re: /gemma/i, maker: "Google", context: "32K tokens", license: "Gemma terms of use",
+      good: "general chat and summaries",
+      about: "Google's open-weights family, built from the same research as Gemini." },
+    { re: /llama-?3\.2/i, maker: "Meta", context: "128K tokens", license: "Llama 3.2 Community License",
+      good: "general chat, summaries, following instructions",
+      about: "Meta's small Llama models, tuned to follow instructions." },
+    { re: /TinyLlama/i, maker: "TinyLlama project", context: "2K tokens", license: "apache-2.0",
+      good: "quick experiments; answers can be shaky",
+      about: "A 1.1B model trained on a huge amount of text for its size." },
+    { re: /Phi-3\.5/i, maker: "Microsoft", context: "128K tokens", license: "mit",
+      good: "reasoning, math and code for its size",
+      about: "Microsoft's small model trained mostly on carefully filtered and synthetic data." },
+  ];
+
+  const ENGINE_NAME = { smartest: "built in", tfjs: "Transformers.js", webllm: "WebLLM", ollama: "Ollama" };
+
+  function catalogFor(m) {
+    const key = m.id + " " + m.label;
+    return CATALOG.find((c) => c.re.test(key)) || {};
+  }
+
+  function paramsOf(m) {
+    const c = catalogFor(m);
+    if (c.params) return c.params;
+    const x = /(\d+(?:\.\d+)?)\s*([BM])\b/i.exec(m.label) || /(\d+(?:\.\d+)?)([BM])/i.exec(m.id);
+    if (!x) return "?";
+    const v = parseFloat(x[1]);
+    return x[2].toUpperCase() === "M" ? (v / 1000).toFixed(2).replace(/0$/, "") + "B" : v + "B";
+  }
+
+  function fit(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "." : s.padEnd(n); }
+
+  function wrapText(text, width) {
+    const out = [];
+    let line = "";
+    for (const w of String(text).split(/\s+/)) {
+      if (line && (line + " " + w).length > width) { out.push(line); line = w; }
+      else line = line ? line + " " + w : w;
+    }
+    if (line) out.push(line);
+    return out;
+  }
+
+  async function hfInfo(repo) {
+    const res = await fetch("https://huggingface.co/api/models/" + repo, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json();
+    const lic = (j.tags || []).find((t) => t.startsWith("license:"));
+    return {
+      license: lic ? lic.slice(8) : (j.cardData && j.cardData.license) || "",
+      downloads: j.downloads, likes: j.likes,
+      updated: (j.lastModified || "").slice(0, 10),
+    };
+  }
+
+  async function ollamaShow(name) {
+    const res = await fetch(OLLAMA_URL + "/api/show", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: name }), signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
+  async function modelInfo(target) {
+    if (!lastModels.length) await gatherModels();
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lines = [];
+
+    if (!target) {
+      setBusy("finding model info");
+      lines.push("  #  Model                        Maker                Size    Engine");
+      lastModels.forEach((m, i) => {
+        const { name } = engineOf(m.id);
+        lines.push(`  ${letters[i]}  ${fit(m.label, 28)} ${fit(catalogFor(m).maker || (name === "ollama" ? "(see details)" : "?"), 20)} ${fit(paramsOf(m), 7)} ${ENGINE_NAME[name] || name}`);
+      });
+      lines.push("");
+      lines.push("Type mp finder <letter> for one model's details, with live stats.");
+      for (const l of lines) sendText("M", l);
+      setBusy("");
+      send("D", "");
+      return;
+    }
+
+    const idx = lastModels.findIndex((m) => m.id === target);
+    if (idx < 0) throw new Error("That model isn't in the list any more. Type models to refresh it.");
+    const m = lastModels[idx];
+    const { name, model } = engineOf(m.id);
+    const c = catalogFor(m);
+    setBusy("finding info on " + m.label);
+    const adapter = await gpuAdapter();
+
+    let live = null, liveNote = "", source = "", contextNote = "", runs = "", license = c.license || "";
+    let maker = c.maker || "", params = paramsOf(m);
+    if (name === "tfjs" || name === "webllm") {
+      const repo = name === "tfjs" ? model : "mlc-ai/" + model;
+      source = "huggingface.co/" + repo;
+      try { live = await hfInfo(repo); } catch (_) { liveNote = "(live stats unavailable: no connection to Hugging Face)"; }
+      if (live && live.license) license = live.license;
+      runs = name === "tfjs"
+        ? "in this browser tab, " + (adapter ? "on your GPU (WebGPU)" : "on the CPU (WebAssembly)")
+        : "in this browser tab, on your GPU (WebGPU)";
+      if (name === "webllm" && webllm) {
+        const rec = webllm.prebuiltAppConfig.model_list.find((x) => x.model_id === model);
+        const ctx = rec && rec.overrides && rec.overrides.context_window_size;
+        if (ctx) contextNote = `${Math.round(ctx / 1024)}K tokens in this WebLLM build`;
+      }
+    } else if (name === "ollama") {
+      runs = "on your PC, served by Ollama at localhost:11434";
+      try {
+        const s = await ollamaShow(model);
+        const d = s.details || {};
+        if (d.parameter_size) params = d.parameter_size;
+        if (!maker && d.family) maker = d.family + " family";
+        if (d.quantization_level) runs += ` (${d.quantization_level})`;
+        const mi = s.model_info || {};
+        const arch = mi["general.architecture"];
+        const ctx = arch && mi[arch + ".context_length"];
+        if (ctx) contextNote = `${Math.round(ctx / 1024)}K tokens`;
+        if (s.license) license = String(s.license).split("\n").find((l) => l.trim()) || license;
+        live = { fromOllama: true };
+      } catch (_) { liveNote = "(Ollama didn't answer, so these details are partial)"; }
+      source = "ollama.com/library/" + model.split(":")[0];
+    } else {
+      runs = "inside this page; nothing to download";
+    }
+
+    const status = m.status === "downloaded" ? "already downloaded" : m.status === "ready" ? "ready" : m.status === "on your PC" ? "installed on your PC" : "not downloaded yet";
+    const row = (k, v) => ` ${k.padEnd(12)} ${v}`;
+    const head = ` ${m.label}`;
+    const tag = `${letters[idx]} - ${ENGINE_NAME[name] || name} `;
+    lines.push(head + " ".repeat(Math.max(1, 79 - head.length - tag.length)) + tag);
+    lines.push(" " + "-".repeat(77));
+    if (maker) lines.push(row("Maker", maker));
+    lines.push(row("Size", `${params} parameters, ${m.size} (${status})`));
+    lines.push(row("Runs", runs));
+    if (contextNote || c.context) lines.push(row("Context", contextNote || c.context));
+    if (license) lines.push(row("Licence", fit(license, 64)));
+    if (live && !live.fromOllama) {
+      lines.push(row("Popularity", `${(live.downloads || 0).toLocaleString("en-US")} downloads last month, ${(live.likes || 0).toLocaleString("en-US")} likes  (live)`));
+      if (live.updated) lines.push(row("Updated", live.updated + "  (live)"));
+    }
+    if (c.good) lines.push(row("Good at", c.good));
+    if (c.about) wrapText(c.about, 64).forEach((l, i) => lines.push(row(i ? "" : "About", l)));
+    if (source) lines.push(row("Source", source));
+    if (liveNote) lines.push(" " + liveNote);
+    for (const l of lines) sendText("M", l);
+    setBusy("");
+    send("D", "");
+  }
+
+  // ----------------------------------------------------------- solMeteo
+  //
+  // `meteo <place>` in ConMon: geocode the place with Open-Meteo, fetch the
+  // forecast, and stream a full-screen animation: an ASCII world map (from
+  // GeoJSON country outlines) zooming in on the place, then the weather.
+  // Frames go to ConMon as 'A' packets: <rows> byte, rows*80 chars, rows*80 attrs.
+
+  const GEOJSON_URL = "/meteo/countries.geo.json";
+  const GEO_API = "https://geocoding-api.open-meteo.com/v1/search";
+  const WX_API = "https://api.open-meteo.com/v1/forecast";
+  const ROWS = 22, MAP_TOP = 1, MAP_ROWS = 13, PANEL = MAP_TOP + MAP_ROWS;
+  let world = null;                       // [{ name, polys: [{ bbox, rings }] }]
+  let meteoRun = 0;                       // bumps to cancel a running animation
+
+  const WMO = {
+    0: ["Clear sky", "sun"], 1: ["Mainly clear", "sun"], 2: ["Partly cloudy", "partly"], 3: ["Overcast", "cloud"],
+    45: ["Fog", "fog"], 48: ["Freezing fog", "fog"],
+    51: ["Light drizzle", "rain"], 53: ["Drizzle", "rain"], 55: ["Heavy drizzle", "rain"],
+    56: ["Freezing drizzle", "rain"], 57: ["Freezing drizzle", "rain"],
+    61: ["Light rain", "rain"], 63: ["Rain", "rain"], 65: ["Heavy rain", "rain"],
+    66: ["Freezing rain", "rain"], 67: ["Freezing rain", "rain"],
+    71: ["Light snow", "snow"], 73: ["Snow", "snow"], 75: ["Heavy snow", "snow"], 77: ["Snow grains", "snow"],
+    80: ["Rain showers", "rain"], 81: ["Rain showers", "rain"], 82: ["Violent showers", "rain"],
+    85: ["Snow showers", "snow"], 86: ["Heavy snow showers", "snow"],
+    95: ["Thunderstorm", "storm"], 96: ["Thunderstorm, hail", "storm"], 99: ["Thunderstorm, hail", "storm"],
+  };
+  const ICONS = {
+    sun:    [14, ["  \\ | /  ", "  - O -  ", "  / | \\  "]],
+    moon:   [7,  ["   .-.   ", "  (   )  ", "   `-'   "]],
+    partly: [14, [" \\ /     ", "-O .--.  ", " (      )"]],
+    cloud:  [7,  ["   .--.  ", " (      )", "  `----' "]],
+    rain:   [9,  ["   .--.  ", " (      )", "  ' ' '  "]],
+    snow:   [15, ["   .--.  ", " (      )", "  * * *  "]],
+    storm:  [14, ["   .--.  ", " (      )", "   /_/_  "]],
+    fog:    [8,  [" _ - _ - ", "  _ - _  ", " _ - _ - "]],
+  };
+  const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+  async function loadWorld(onProgress) {
+    if (world) return world;
+    const blob = await fetchWithProgress(GEOJSON_URL, onProgress || (() => {}));
+    const geo = JSON.parse(await blob.text());
+    world = geo.features.map((f) => {
+      const g = f.geometry || {};
+      const polys = (g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : []).map((rings) => {
+        let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
+        for (const [x, y] of rings[0]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        return { bbox: [x0, y0, x1, y1], rings };
+      });
+      return { name: (f.properties && f.properties.name) || f.id || "", polys };
+    });
+    return world;
+  }
+
+  function inRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  // Index of the country under (lon, lat), or -1 for sea.
+  function countryAt(lon, lat) {
+    for (let c = 0; c < world.length; c++) {
+      for (const p of world[c].polys) {
+        const b = p.bbox;
+        if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+        if (!inRing(lon, lat, p.rings[0])) continue;
+        let hole = false;
+        for (let h = 1; h < p.rings.length; h++) if (inRing(lon, lat, p.rings[h])) { hole = true; break; }
+        if (!hole) return c;
+      }
+    }
+    return -1;
+  }
+
+  // CP437 screen buffer helpers.
+  function newScreen() { return { ch: new Uint8Array(ROWS * 80).fill(32), at: new Uint8Array(ROWS * 80).fill(0x07) }; }
+  function cp437(c) {
+    if (c === "°") return 0xF8;
+    if (c === "·") return 0xFA;
+    const code = c.charCodeAt(0);
+    return code >= 32 && code < 127 ? code : 63;
+  }
+  function put(scr, row, col, text, attr) {
+    text = String(text).normalize("NFKD").replace(/[̀-ͯ]/g, "");
+    for (let i = 0; i < text.length; i++) {
+      const x = col + i;
+      if (x < 0 || x >= 80 || row < 0 || row >= ROWS) continue;
+      scr.ch[row * 80 + x] = cp437(text[i]);
+      if (attr != null) scr.at[row * 80 + x] = attr;
+    }
+  }
+  function fill(scr, row, attr, ch) {
+    for (let x = 0; x < 80; x++) { scr.ch[row * 80 + x] = ch || 32; scr.at[row * 80 + x] = attr; }
+  }
+  function sendScreen(scr) {
+    const out = new Uint8Array(1 + ROWS * 160);
+    out[0] = ROWS;
+    out.set(scr.ch, 1);
+    out.set(scr.at, 1 + ROWS * 80);
+    send("A", out);
+  }
+
+  const wrapLon = (l) => ((((l + 180) % 360) + 360) % 360) - 180;
+
+  // Draws the map rows for a view centred on (lon0, lat0) with `s` degrees
+  // of longitude per column. Cells are about twice as tall as wide.
+  function drawMap(scr, lon0, lat0, s, t, target, place, markerOn) {
+    const rowDeg = 2 * s * Math.max(0.2, Math.cos((lat0 * Math.PI) / 180));
+    for (let r = 0; r < MAP_ROWS; r++) {
+      const lat = lat0 - (r - (MAP_ROWS - 1) / 2) * rowDeg;
+      for (let c = 0; c < 80; c++) {
+        const lon = wrapLon(lon0 + (c - 39.5) * s);
+        const i = (MAP_TOP + r) * 80 + c;
+        const k = lat > 85 || lat < -85 ? -1 : countryAt(lon, lat);
+        if (k < 0) {
+          const wave = (c * 7 + r * 13 + t) % 11 === 0;
+          scr.ch[i] = wave ? 0x7E : 32;              // ~
+          scr.at[i] = 0x01;                          // blue on black
+        } else if (k === target) {
+          scr.ch[i] = 0xB2; scr.at[i] = 0x0A;        // dark shade, light green
+        } else {
+          scr.ch[i] = 0xB1; scr.at[i] = 0x02;        // medium shade, green
+        }
+      }
+    }
+    if (!place) return;
+    // Marker and label at the place.
+    let dl = wrapLon(place.lon - lon0);
+    const mc = Math.round(39.5 + dl / s);
+    const mr = Math.round((MAP_ROWS - 1) / 2 + (lat0 - place.lat) / rowDeg);
+    if (mc < 0 || mc > 79 || mr < 0 || mr >= MAP_ROWS) return;
+    const row = MAP_TOP + mr;
+    put(scr, row, mc, "@", markerOn ? 0x4E : 0x0C);  // yellow on red / light red
+    const label = " " + place.name + " ";
+    if (mc + 2 + label.length <= 80) put(scr, row, mc + 2, label, 0x70);
+    else put(scr, row, mc - 1 - label.length, label, 0x70);
+  }
+
+  function header(scr, text) {
+    fill(scr, 0, 0x1F);
+    put(scr, 0, 1, "solMeteo", 0x1E);
+    put(scr, 0, 11, text, 0x1F);
+    put(scr, 0, 68, "Open-Meteo", 0x1B);
+  }
+
+  function fmtLat(v) { return Math.abs(v).toFixed(2) + "°" + (v >= 0 ? "N" : "S"); }
+  function fmtLon(v) { return Math.abs(v).toFixed(2) + "°" + (v >= 0 ? "E" : "W"); }
+  function placeTitle(p) { return [p.name, p.admin1 && p.admin1 !== p.name ? p.admin1 : "", p.country].filter(Boolean).join(", "); }
+
+  function drawPanel(scr, place, wx, t) {
+    for (let r = PANEL; r < ROWS; r++) fill(scr, r, 0x07);
+    // Divider with the place details.
+    for (let x = 0; x < 80; x++) { scr.ch[PANEL * 80 + x] = 0xC4; scr.at[PANEL * 80 + x] = 0x08; }
+    const info = ` ${placeTitle(place)} · ${fmtLat(place.lat)} ${fmtLon(place.lon)}${place.elevation != null ? " · " + Math.round(place.elevation) + " m" : ""} `;
+    put(scr, PANEL, 2, info.slice(0, 76), 0x0E);
+
+    if (!wx) {
+      const spin = "|/-\\"[t % 4];
+      put(scr, PANEL + 2, 4, `${spin} Fetching the forecast from Open-Meteo...`, 0x0B);
+      return;
+    }
+    const cur = wx.current, d = wx.daily;
+    const [desc, iconKey0] = WMO[cur.weather_code] || ["Unknown", "cloud"];
+    const iconKey = iconKey0 === "sun" && cur.is_day === 0 ? "moon" : iconKey0;
+    const [iconColor, icon] = ICONS[iconKey];
+    icon.forEach((l, i) => put(scr, PANEL + 1 + i, 1, l, iconColor));
+
+    const temp = `${Math.round(cur.temperature_2m * 10) / 10}°C`;
+    put(scr, PANEL + 1, 12, temp, 0x0F);
+    put(scr, PANEL + 1, 12 + temp.length + 2, desc, 0x0E);
+    const localTime = String(cur.time || "").slice(11, 16);
+    put(scr, PANEL + 1, 50, `Local time ${localTime}`, 0x07);
+    const wind = `${Math.round(cur.wind_speed_10m)} km/h ${COMPASS[Math.round(((cur.wind_direction_10m || 0) % 360) / 45) % 8]}`;
+    put(scr, PANEL + 2, 12, `Feels like ${Math.round(cur.apparent_temperature)}°C   Humidity ${cur.relative_humidity_2m}%   Wind ${wind}`, 0x07);
+    put(scr, PANEL + 3, 12, `Precipitation ${cur.precipitation} mm   ${wx.timezone || ""}`, 0x07);
+
+    for (let i = 0; i < 3 && d && i < d.time.length; i++) {
+      const row = PANEL + 4 + i;
+      const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : new Date(d.time[i] + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" });
+      const [ddesc] = WMO[d.weather_code[i]] || ["?"];
+      const hi = Math.round(d.temperature_2m_max[i]), lo = Math.round(d.temperature_2m_min[i]);
+      put(scr, row, 2, label.padEnd(10), 0x0F);
+      put(scr, row, 13, `${hi}°/${lo}°`.padEnd(10), 0x0B);
+      put(scr, row, 24, ddesc.padEnd(22), 0x07);
+      const pp = d.precipitation_probability_max && d.precipitation_probability_max[i];
+      if (pp != null) put(scr, row, 47, `rain chance ${pp}%`, pp >= 50 ? 0x09 : 0x08);
+    }
+    put(scr, ROWS - 1, 2, "Weather data: Open-Meteo.com (CC BY 4.0) · Places: GeoNames", 0x08);
+  }
+
+  async function geocode(name) {
+    const url = `${GEO_API}?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
+    let res;
+    try { res = await fetch(url, { signal: AbortSignal.timeout(10000) }); } catch (_) {
+      throw new Error("Couldn't reach Open-Meteo. Check your internet connection.");
+    }
+    if (!res.ok) throw new Error(`Open-Meteo place search answered ${res.status}.`);
+    const j = await res.json();
+    const r = j.results && j.results[0];
+    if (!r) throw new Error(`No place called "${name}". Try a city name, like Rome or Tokyo.`);
+    return { name: r.name, admin1: r.admin1, country: r.country, lat: r.latitude, lon: r.longitude, elevation: r.elevation, timezone: r.timezone };
+  }
+
+  async function forecast(p) {
+    const q = new URLSearchParams({
+      latitude: p.lat, longitude: p.lon, timezone: "auto", forecast_days: "3",
+      current: "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",
+      daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+    });
+    const res = await fetch(`${WX_API}?${q}`, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw new Error(`Open-Meteo forecast answered ${res.status}.`);
+    return res.json();
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+
+  async function showMeteo(text) {
+    const run = ++meteoRun;
+    const query = String(text).trim();
+    if (query.length < 2) throw new Error("Type at least two letters of a place name.");
+    setBusy("solMeteo: " + query);
+    await loadWorld();
+    const place = await geocode(query);
+    const target = countryAt(place.lon, place.lat);
+    let wx = null, wxErr = null;
+    const wxPromise = forecast(place).then((v) => { wx = v; }, (e) => { wxErr = e; });
+
+    // Fly from a world view to the place: zoom in on a log scale.
+    const FRAMES = 16;
+    const s0 = 4.5, s1 = 0.6;          // degrees of longitude per column: world -> region
+    const lonStart = 0, latStart = 20;
+    const dLon = wrapLon(place.lon - lonStart);
+    const latEnd = Math.max(-60, Math.min(70, place.lat));
+    const title = `${placeTitle(place)}`.slice(0, 55);
+    for (let f = 0; f <= FRAMES; f++) {
+      if (run !== meteoRun) return;
+      const k = ease(f / FRAMES);
+      const s = Math.exp(Math.log(s0) + (Math.log(s1) - Math.log(s0)) * k);
+      const scr = newScreen();
+      header(scr, f < FRAMES ? `Flying to ${title}...` : title);
+      drawMap(scr, wrapLon(lonStart + dLon * k), latStart + (latEnd - latStart) * k, s, f, target, f > FRAMES * 0.6 ? place : null, true);
+      drawPanel(scr, place, null, f);
+      sendScreen(scr);
+      await sleep(110);
+    }
+    // Pulse the marker until the forecast has arrived (and a little after).
+    let t = FRAMES, pulses = 0;
+    for (;;) {
+      if (run !== meteoRun) return;
+      const done = wx || wxErr;
+      const scr = newScreen();
+      header(scr, title);
+      drawMap(scr, wrapLon(lonStart + dLon), latEnd, s1, t, target, place, t % 2 === 0);
+      if (wxErr) throw new Error(wxErr.message || "The forecast didn't arrive.");
+      drawPanel(scr, place, wx, t);
+      sendScreen(scr);
+      if (done && ++pulses >= 4) break;
+      if (t - FRAMES > 120) throw new Error("The forecast is taking too long. Try again.");
+      t++;
+      await sleep(260);
+    }
+    await wxPromise;
+    // Final frame: marker steady.
+    const scr = newScreen();
+    header(scr, title);
+    drawMap(scr, wrapLon(lonStart + dLon), latEnd, s1, t, target, place, true);
+    drawPanel(scr, place, wx, t);
+    sendScreen(scr);
+    setBusy("");
+    send("D", "");
+  }
+
+  async function installMeteo() {
+    cancelled = false;
+    setBusy("installing solMeteo");
+    progress(0, "Downloading the world map (GeoJSON)");
+    await loadWorld((f) => progress(f * 90, "Downloading the world map (GeoJSON)"));
+    progress(100, `Map ready: ${world.length} countries`);
+    state.meteo = true;
+    setBusy("");
+    send("D", "solmeteo");
+  }
+
   // ------------------------------------------------------------ public
 
   window.ConMonHost = {
@@ -673,15 +964,14 @@
       emu = emulator;
       emitText = textSink;
       mode = 0; frame = "";
-      stopVideo(true);
-      state.mp4 = false; state.llm = false;   // a fresh ConMon has nothing installed
+      meteoRun++;
+      state.meteo = false; state.llm = false;   // a fresh ConMon has nothing installed
       state.model = null; state.modelLabel = "";
       history = [];
       onState(state);
     },
-    detach() { stopVideo(true); emu = null; },
+    detach() { meteoRun++; emu = null; },
     onByte,
-    addUserVideo,
     checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
     get state() { return state; },

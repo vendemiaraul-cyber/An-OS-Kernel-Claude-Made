@@ -65,6 +65,7 @@ void    vga_set_color(uint8_t fg, uint8_t bg);
 uint8_t vga_get_color(void);
 void    vga_put_at(char c, uint8_t color, int x, int y);
 void    vga_cursor_visible(int on);
+void    vga_set_cursor(int x, int y);       /* where the next character goes */
 void    vga_disable_blink(void);        /* attribute bit 7 = bright background */
 
 /* ---------- serial port COM1 (drivers/serial.c) ---------- */

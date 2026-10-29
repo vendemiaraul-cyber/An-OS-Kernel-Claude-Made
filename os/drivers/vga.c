@@ -59,6 +59,15 @@ void vga_init(void) {
     vga_clear();
 }
 
+void vga_set_cursor(int x, int y) {
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= VGA_WIDTH) x = VGA_WIDTH - 1;
+    if (y >= VGA_HEIGHT) y = VGA_HEIGHT - 1;
+    cx = x; cy = y;
+    move_cursor();
+}
+
 void vga_put_at(char c, uint8_t col, int x, int y) {
     if (x >= 0 && x < VGA_WIDTH && y >= 0 && y < VGA_HEIGHT)
         VGA[y * VGA_WIDTH + x] = cell(c, col);

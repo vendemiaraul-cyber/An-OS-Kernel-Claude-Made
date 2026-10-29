@@ -1,20 +1,21 @@
 // ConMon - packages.cpp : the package manager and the commands it adds.
 //
-//   install            list packages
-//   install mp4        MP4 player + sample videos      -> adds `play`
-//   install llm        chat with an AI model           -> adds `models`, `load`
-//                      engines: SmartestChild, Transformers.js, WebLLM, Ollama
+//   install                  list packages
+//   install llm              chat with an AI model     -> adds `models`, `load`, `mp`
+//   install llm all          ...and download every model right away
+//   install solMeteo         live weather + ASCII map  -> adds `meteo`
 //
-// ConMon can't decode video or run a neural network itself, so packages work
-// through the host link (kernel/hostlink.c): ConMon Lab, the browser page
-// around the emulator, does the heavy lifting and streams results back over
-// the serial port. On QEMU or a real PC there is no host, and install says so.
+// ConMon can't run a neural network or reach the internet itself, so
+// packages work through the host link (kernel/hostlink.c): ConMon Lab, the
+// browser page around the emulator, does the heavy lifting and streams
+// results back over the serial port. On QEMU or a real PC there is no host,
+// and install says so.
 #include "shell.hpp"
 
 namespace {
 
 bool host_ok;
-bool mp4_installed, llm_installed;
+bool llm_installed, meteo_installed;
 
 struct Model {
     char   letter;
@@ -47,11 +48,17 @@ bool wait_packet(hl_packet &p, uint32_t timeout_ms, bool *cancelled = nullptr) {
     }
 }
 
-// Splits "a|b|c" in place-free style: returns field n (0-based) as a String.
+// Returns field n (0-based) of "a|b|c" as a String.
 String field(const char *s, int n, char sep = '|') {
     for (int i = 0; i < n && *s; s++) if (*s == sep) i++;
     String out;
     while (*s && *s != sep && *s != '\n') out += *s++;
+    return out;
+}
+
+String lower(const char *s) {
+    String out;
+    for (; *s; s++) out += (*s >= 'A' && *s <= 'Z') ? (char)(*s + 32) : *s;
     return out;
 }
 
@@ -101,8 +108,10 @@ void draw_progress(int pct, const char *text) {
     print(line);
 }
 
+enum JobResult { JOB_OK, JOB_ERROR, JOB_CANCELLED };
+
 // Sends a request and follows the host's progress until it finishes.
-bool host_job(Shell &sh, const char *type, const char *payload) {
+JobResult host_job_ex(Shell &sh, const char *type, const char *payload) {
     hostlink_send(type, payload);
     bool showed_bar = false, cancelled = false;
     hl_packet p;
@@ -112,7 +121,7 @@ bool host_job(Shell &sh, const char *type, const char *payload) {
                 hostlink_send("cancel", type);
                 if (showed_bar) kputc('\n');
                 error("Cancelled.");
-                return false;
+                return JOB_CANCELLED;
             }
             continue;
         }
@@ -131,15 +140,19 @@ bool host_job(Shell &sh, const char *type, const char *payload) {
             break;
         case 'D':
             if (showed_bar) kputc('\n');
-            return true;
+            return JOB_OK;
         case 'E':
             if (showed_bar) kputc('\n');
             error("%s", d);
-            return false;
+            return JOB_ERROR;
         default:
             break;
         }
     }
+}
+
+bool host_job(Shell &sh, const char *type, const char *payload) {
+    return host_job_ex(sh, type, payload) == JOB_OK;
 }
 
 // -------------------------------------------------------------- word wrap
@@ -170,29 +183,34 @@ private:
     String word_;
 };
 
-// --------------------------------------------------------------- commands
+// ----------------------------------------------------------------- models
 
-void cmd_play(Shell &sh, const Args &a);
 void cmd_models(Shell &sh, const Args &a);
 void cmd_load(Shell &sh, const Args &a);
+void cmd_mp(Shell &sh, const Args &a);
+void cmd_meteo(Shell &sh, const Args &a);
 
 void list_packages() {
     Color c(VGA_YELLOW);
     print("Packages (delivered by ConMon Lab):\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    kprintf("  mp4   MP4 video player + 4 sample videos          %s\n", mp4_installed ? "[installed]" : "");
-    kprintf("  llm   AI chat: SmartestChild, Transformers.js, WebLLM, Ollama %s\n",
+    kprintf("  llm        AI chat: SmartestChild, Transformers.js, WebLLM, Ollama %s\n",
             llm_installed ? "[installed]" : "");
-    print("Usage: install <name>    e.g. install mp4\n");
+    kprintf("  solMeteo   Live weather from Open-Meteo with an ASCII world map  %s\n",
+            meteo_installed ? "[installed]" : "");
+    print("Usage: install <name>    e.g. install solMeteo\n"
+          "       install llm all   installs llm and downloads every model\n");
 }
 
-bool pick_model(Shell &sh) {
+// Asks the host for the model list. Messages the host sends first (setup
+// hints for engines that aren't available) are printed unless quiet.
+bool fetch_models(bool quiet = false) {
     hostlink_send("llm.models", "");
     hl_packet p;
     for (;;) {
         bool cancelled;
         if (!wait_packet(p, 60000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
-        if (p.type == 'M') { kprintf("%s\n", reinterpret_cast<const char *>(p.data)); continue; }
+        if (p.type == 'M') { if (!quiet) kprintf("%s\n", reinterpret_cast<const char *>(p.data)); continue; }
         if (p.type == 'E') { error("%s", reinterpret_cast<const char *>(p.data)); return false; }
         if (p.type == 'L') break;
     }
@@ -213,7 +231,10 @@ bool pick_model(Shell &sh) {
         if (*d == '\n') d++;
     }
     if (models.empty()) { error("No models can run on this device."); return false; }
+    return true;
+}
 
+void show_models() {
     {
         Color c(VGA_YELLOW);
         print("\nAI models that can run here:\n");
@@ -229,67 +250,93 @@ bool pick_model(Shell &sh) {
         kprintf("   %c  %-30s %9s  %s\n", m.letter, m.label.c_str(), m.size.c_str(), m.status.c_str());
     }
     print("\n");
-
-    String choice = sh.editor().read("Type a letter to choose (Enter to skip): ", false, 2);
-    if (choice.empty()) { print("No model chosen. Type models to see the list again.\n"); return false; }
-    char want = choice[0];
-    if (want >= 'a' && want <= 'z') want = (char)(want - 32);
-    for (const auto &m : models) {
-        if (m.letter != want) continue;
-        if (m.status.empty())
-            kprintf("Downloading %s (%s). This runs once; it's cached in your browser.\n",
-                    m.label.c_str(), m.size.c_str());
-        else
-            kprintf("Getting %s ready...\n", m.label.c_str());
-        if (!host_job(sh, "llm.download", m.id.c_str())) return false;
-        ready_id = m.id;
-        ready_label = m.label;
-        Color c(VGA_LIGHT_GREEN);
-        kprintf("%s is ready. Type load to talk with it.\n", m.label.c_str());
-        return true;
-    }
-    error("No model with letter %s.", choice.c_str());
-    return false;
 }
 
-void cmd_install(Shell &sh, const Args &a) {
-    if (a.count() < 2) { list_packages(); return; }
-    String name;
-    for (const char *s = a[1]; *s; s++) name += (*s >= 'A' && *s <= 'Z') ? (char)(*s + 32) : *s;
-    bool mp4 = name == "mp4";
-    bool llm = name == "llm";
-    if (!mp4 && !llm) { error("No package named %s. Type install to see the list.", a[1]); return; }
-    if (!host_available()) { no_host(); return; }
+const Model *find_model(const char *text) {
+    char want = text[0];
+    if (want >= 'a' && want <= 'z') want = (char)(want - 32);
+    if (text[0] && !text[1]) {
+        for (const auto &m : models) if (m.letter == want) return &m;
+    }
+    return nullptr;
+}
 
-    if (mp4) {
-        if (!host_job(sh, "pkg.install", "mp4")) return;
-        mp4_installed = true;
-        if (!sh.has("play"))
-            sh.add(new FnCommand("play", "play <file.mp4>", "play a video (mp4 package)", cmd_play));
+// Downloads (if needed) and loads a model so `load` can chat with it.
+bool prepare_model(Shell &sh, const Model &m) {
+    if (m.status.empty())
+        kprintf("Downloading %s (%s). This runs once; it's cached in your browser.\n",
+                m.label.c_str(), m.size.c_str());
+    else
+        kprintf("Getting %s ready...\n", m.label.c_str());
+    if (!host_job(sh, "llm.download", m.id.c_str())) return false;
+    ready_id = m.id;
+    ready_label = m.label;
+    return true;
+}
+
+bool pick_model(Shell &sh) {
+    if (!fetch_models()) return false;
+    show_models();
+    String choice = sh.editor().read("Type a letter to choose (Enter to skip): ", false, 2);
+    if (choice.empty()) { print("No model chosen. Type models to see the list again.\n"); return false; }
+    const Model *m = find_model(choice.c_str());
+    if (!m) { error("No model with letter %s.", choice.c_str()); return false; }
+    if (!prepare_model(sh, *m)) return false;
+    Color c(VGA_LIGHT_GREEN);
+    kprintf("%s is ready. Type load to talk with it.\n", m->label.c_str());
+    return true;
+}
+
+// "~270 MB" / "1.4 GB" -> megabytes (rough; only used for the total).
+uint32_t size_mb(const String &s) {
+    const char *p = s.c_str();
+    while (*p && (*p < '0' || *p > '9')) p++;
+    uint32_t whole = 0, frac = 0, fdiv = 1;
+    while (*p >= '0' && *p <= '9') whole = whole * 10 + (uint32_t)(*p++ - '0');
+    if (*p == '.') for (p++; *p >= '0' && *p <= '9' && fdiv < 1000; p++) { frac = frac * 10 + (uint32_t)(*p - '0'); fdiv *= 10; }
+    bool gb = false;
+    for (; *p; p++) if (*p == 'G') gb = true;
+    return gb ? whole * 1000 + frac * 1000 / fdiv : whole;
+}
+
+// install llm all: download every browser model in one go.
+void install_all_models(Shell &sh) {
+    if (!fetch_models(true)) return;
+    Vector<size_t> todo;
+    uint32_t total = 0;
+    for (size_t i = 0; i < models.size(); i++) {
+        const Model &m = models[i];
+        bool browser = strncmp(m.id.c_str(), "tfjs:", 5) == 0 || strncmp(m.id.c_str(), "webllm:", 7) == 0;
+        if (browser && m.status.empty()) { todo.push_back(i); total += size_mb(m.size); }
+    }
+    if (todo.empty()) {
         Color c(VGA_LIGHT_GREEN);
-        print("Installed mp4. ");
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-        print("New command: play. Sample videos are on the RAM disk:\n");
-        for (const auto &f : sh.fs().files()) {
-            const char *n = f.name.c_str();
-            size_t l = strlen(n);
-            if (l > 4 && strcmp(n + l - 4, ".mp4") == 0) kprintf("  %s\n", n);
-        }
-        print("Try: play ep1.mp4   (q to stop, space to pause)\n");
+        print("Every model is already downloaded or ready. Type models to pick one.\n");
         return;
     }
-
-    if (!host_job(sh, "pkg.install", "llm")) return;
-    llm_installed = true;
-    if (!sh.has("load")) {
-        sh.add(new FnCommand("models", "models", "pick an AI model (llm package)", cmd_models));
-        sh.add(new FnCommand("load", "load [letter]", "talk to the AI model (llm package)", cmd_load));
+    {
+        Color c(VGA_YELLOW);
+        kprintf("This downloads %u models, about %u.%u GB, into your browser's storage.\n",
+                (uint32_t)todo.size(), total / 1000, (total % 1000) / 100);
     }
-    Color c(VGA_LIGHT_GREEN);
-    print("Installed llm. ");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    print("New commands: models, load.\n");
-    pick_model(sh);
+    print("SmartestChild and Ollama models need no download. Ctrl+C stops at any time.\n");
+    String yes = sh.editor().read("Download them all? (y/N): ", false, 3);
+    if (yes.empty() || (yes[0] != 'y' && yes[0] != 'Y')) { print("Skipped. Type models to pick just one.\n"); return; }
+
+    uint32_t ok = 0;
+    for (size_t n = 0; n < todo.size(); n++) {
+        const Model &m = models[todo[n]];
+        {
+            Color c(VGA_WHITE);
+            kprintf("[%u/%u] %c  %s (%s)\n", (uint32_t)(n + 1), (uint32_t)todo.size(), m.letter, m.label.c_str(), m.size.c_str());
+        }
+        JobResult r = host_job_ex(sh, "llm.download", m.id.c_str());
+        if (r == JOB_CANCELLED) break;
+        if (r == JOB_OK) { ok++; ready_id = m.id; ready_label = m.label; }
+    }
+    Color c(ok ? VGA_LIGHT_GREEN : VGA_YELLOW);
+    kprintf("Downloaded %u of %u models. Type models to see them, or load <letter> to chat.\n",
+            ok, (uint32_t)todo.size());
 }
 
 void cmd_models(Shell &sh, const Args &) {
@@ -341,121 +388,166 @@ void chat(Shell &sh) {
 void cmd_load(Shell &sh, const Args &a) {
     if (!host_available()) { no_host(); return; }
     if (a.count() > 1) {
-        char want = a[1][0];
-        if (want >= 'a' && want <= 'z') want = (char)(want - 32);
-        bool found = false;
-        for (const auto &m : models) {
-            if (m.letter != want) continue;
-            found = true;
-            if (m.id != ready_id.c_str()) {
-                kprintf("Loading %s (%s)...\n", m.label.c_str(), m.size.c_str());
-                if (!host_job(sh, "llm.download", m.id.c_str())) return;
-                ready_id = m.id;
-                ready_label = m.label;
-            }
+        if (models.empty() && !fetch_models(true)) return;
+        const Model *m = find_model(a[1]);
+        if (!m) { error("No model with letter %s. Type models to see the list.", a[1]); return; }
+        if (m->id != ready_id.c_str()) {
+            kprintf("Loading %s (%s)...\n", m->label.c_str(), m->size.c_str());
+            if (!host_job(sh, "llm.download", m->id.c_str())) return;
+            ready_id = m->id;
+            ready_label = m->label;
         }
-        if (!found) { error("No model with letter %s. Type models to see the list.", a[1]); return; }
     }
     if (ready_id.empty()) {
-        error("No model downloaded yet. Type models and pick one with its letter.");
+        error("No model chosen yet. Type models and pick one with its letter.");
         return;
     }
     if (!host_job(sh, "llm.load", ready_id.c_str())) return;
     chat(sh);
 }
 
-// ------------------------------------------------------------------ play
-
-String mp4_id(const String &content) {
-    // Sample files contain a line "id: ep1"
-    const char *s = content.c_str();
-    if (strncmp(s, "MP4", 3) != 0) return String();
-    for (; *s; s++) {
-        if ((s == content.c_str() || s[-1] == '\n') && strncmp(s, "id: ", 4) == 0) {
-            String id;
-            for (s += 4; *s && *s != '\n'; s++) id += *s;
-            return id;
-        }
-    }
-    return String();
-}
-
-void cmd_play(Shell &sh, const Args &a) {
-    if (a.count() < 2) {
-        print("usage: play <file.mp4>   Videos on the RAM disk:\n");
-        for (const auto &f : sh.fs().files()) {
-            const char *n = f.name.c_str();
-            size_t l = strlen(n);
-            if (l > 4 && strcmp(n + l - 4, ".mp4") == 0) kprintf("  %s\n", n);
-        }
+// mp finder [letter]: facts about the AI models (some fetched live).
+void cmd_mp(Shell &sh, const Args &a) {
+    if (a.count() < 2 || lower(a[1]) != "finder") {
+        print("usage: mp finder           overview of every AI model\n"
+              "       mp finder <letter>  details for one model, e.g. mp finder E\n");
         return;
     }
-    RamFS::File *f = sh.fs().find(a[1]);
-    if (!f) { error("play: %s: no such file", a[1]); return; }
-    String id = mp4_id(f->data);
-    if (id.empty()) { error("play: %s is not an MP4 video", a[1]); return; }
+    if (!host_available()) { no_host(); return; }
+    if (models.empty() && !fetch_models(true)) return;
+    String target;
+    if (a.count() > 2) {
+        const Model *m = find_model(a[2]);
+        if (!m) { error("No model with letter %s. Type mp finder to see the letters.", a[2]); return; }
+        target = m->id;
+        Color c(VGA_LIGHT_CYAN);
+        kprintf("Finding info on %s...\n", m->label.c_str());
+    }
+    host_job(sh, "llm.info", target.c_str());
+}
+
+// ------------------------------------------------------------------ meteo
+
+// Draws a full-screen frame from the host: a <rows> byte, rows*80 characters,
+// then rows*80 colour attributes. Returns the number of rows drawn.
+int draw_frame(const hl_packet &p) {
+    if (p.len < 1) return 0;
+    int rows = p.data[0];
+    if (rows < 1 || rows > 25 || p.len < (uint32_t)(1 + rows * 160)) return 0;
+    const uint8_t *ch = p.data + 1, *at = ch + rows * 80;
+    for (int i = 0; i < rows * 80; i++) vga_put_at((char)ch[i], at[i], i % 80, i / 80);
+    return rows;
+}
+
+// Looks up one place: the host geocodes it, fetches the forecast from
+// Open-Meteo and animates a map zooming in on it.
+void show_place(const char *place) {
+    {
+        Color c(VGA_LIGHT_CYAN);
+        kprintf("Looking up %s...\n", place);
+    }
+    hostlink_send("meteo.show", place);
+    bool cleared = false, cancelled = false;
+    int rows = 0;
+    hl_packet p;
+    for (;;) {
+        if (!wait_packet(p, 30000, &cancelled)) {
+            if (cancelled) { hostlink_send("meteo.stop", ""); error("Cancelled."); }
+            else error("No answer from the weather service.");
+            break;
+        }
+        if (p.type == 'A') {
+            if (!cleared) { vga_clear(); vga_cursor_visible(0); cleared = true; }
+            rows = draw_frame(p);
+        } else if (p.type == 'M') {
+            kprintf("%s\n", reinterpret_cast<const char *>(p.data));
+        } else if (p.type == 'E') {
+            error("%s", reinterpret_cast<const char *>(p.data));
+            break;
+        } else if (p.type == 'D') {
+            break;
+        }
+    }
+    if (cleared) {
+        vga_cursor_visible(1);
+        vga_set_cursor(0, rows < 25 ? rows : 24);
+    }
+}
+
+void meteo_loop(Shell &sh, const char *first) {
+    if (first && *first) show_place(first);
+    else print("Type a place (a city, town or region). Empty line or exit to leave.\n");
+    for (;;) {
+        String place = sh.editor().read("location> ", false, 60);
+        if (place.empty() || place == "exit" || place == "quit") { print("Bye from solMeteo!\n"); return; }
+        show_place(place.c_str());
+    }
+}
+
+void cmd_meteo(Shell &sh, const Args &a) {
+    if (!host_available()) { no_host(); return; }
+    String place = a.rest(1);
+    meteo_loop(sh, place.c_str());
+}
+
+// ---------------------------------------------------------------- install
+
+void cmd_install(Shell &sh, const Args &a) {
+    if (a.count() < 2) { list_packages(); return; }
+    String name = lower(a[1]);
+    bool llm = name == "llm";
+    bool meteo = name == "solmeteo" || name == "meteo";
+    if (!llm && !meteo) { error("No package named %s. Type install to see the list.", a[1]); return; }
     if (!host_available()) { no_host(); return; }
 
-    hostlink_send("mp4.play", id.c_str());
-    vga_cursor_visible(0);
-    bool started = false, ended = false;
-    String err;
-    hl_packet p;
-    uint32_t last = now_ms();
-    while (!ended) {
-        if (hostlink_poll(&p)) {
-            last = now_ms();
-            if (p.type == 'F' && p.len >= 80 * 24) {
-                if (!started) { vga_clear(); started = true; }
-                for (int i = 0; i < 80 * 24; i++)
-                    vga_put_at((char)0xDF, p.data[i], i % 80, i / 80);   // upper half block
-                hostlink_send("mp4.ack", "");
-            } else if (p.type == 'S') {
-                for (int x = 0; x < 80; x++) {
-                    char ch = x < (int)p.len ? (char)p.data[x] : ' ';
-                    vga_put_at(ch, 0x70, x, 24);
-                }
-            } else if (p.type == 'X') {
-                ended = true;
-            } else if (p.type == 'E') {
-                err = reinterpret_cast<const char *>(p.data);
-                ended = true;
-            }
-            continue;
+    if (meteo) {
+        if (!host_job(sh, "pkg.install", "solmeteo")) return;
+        meteo_installed = true;
+        if (!sh.has("meteo"))
+            sh.add(new FnCommand("meteo", "meteo [place]", "weather and map (solMeteo package)", cmd_meteo));
+        {
+            Color c(VGA_LIGHT_GREEN);
+            print("Installed solMeteo. ");
         }
-        int k = keyboard_poll();
-        if (k == 'q' || k == 'Q' || k == 27 || k == 3) hostlink_send("mp4.stop", "");
-        else if (k == ' ') hostlink_send("mp4.pause", "");
-        if (now_ms() - last > 8000) { err = "The host stopped sending video."; break; }
-        cpu_halt();
+        print("New command: meteo. Weather data by Open-Meteo.com.\n");
+        String place = a.rest(2);
+        meteo_loop(sh, place.c_str());
+        return;
     }
-    vga_cursor_visible(1);
-    if (started) vga_clear();
-    if (!err.empty()) error("play: %s", err.c_str());
-    else kprintf("Finished playing %s.\n", a[1]);
+
+    String opt = lower(a[2]);
+    bool all = opt == "all" || opt == "{all}";
+    if (a.count() > 2 && !all) { error("Unknown option %s. Try: install llm all", a[2]); return; }
+
+    if (!host_job(sh, "pkg.install", "llm")) return;
+    llm_installed = true;
+    if (!sh.has("load")) {
+        sh.add(new FnCommand("models", "models", "pick an AI model (llm package)", cmd_models));
+        sh.add(new FnCommand("load", "load [letter]", "talk to the AI model (llm package)", cmd_load));
+        sh.add(new FnCommand("mp", "mp finder [letter]", "info on the AI models (llm package)", cmd_mp));
+    }
+    {
+        Color c(VGA_LIGHT_GREEN);
+        print("Installed llm. ");
+    }
+    print("New commands: models, load, mp finder.\n");
+    if (all) install_all_models(sh);
+    else pick_model(sh);
 }
 
 } // namespace
 
 void packages_register(Shell &sh) {
-    sh.add(new FnCommand("install", "install [mp4|llm]", "install a package", cmd_install));
+    sh.add(new FnCommand("install", "install <llm|solMeteo>", "install a package", cmd_install));
 }
 
-// Handles messages the host sends on its own (for example a video the user
-// dropped onto the Kernel Lab page) while the shell waits for input.
-bool packages_idle(Shell &sh) {
+// Handles messages the host sends on its own while the shell waits for input.
+bool packages_idle(Shell &) {
     if (!serial_available()) return false;
     hl_packet p;
     bool printed = false;
     while (hostlink_poll(&p)) {
-        if (p.type == 'W') {
-            save_file(sh, p);
-            String name;
-            for (const uint8_t *d = p.data; *d && *d != '\n'; d++) name += (char)*d;
-            Color c(VGA_LIGHT_CYAN);
-            kprintf("\n[ConMon Lab] received %s - type: play %s\n", name.c_str(), name.c_str());
-            printed = true;
-        } else if (p.type == 'M') {
+        if (p.type == 'M') {
             kprintf("\n[ConMon Lab] %s\n", reinterpret_cast<const char *>(p.data));
             printed = true;
         }

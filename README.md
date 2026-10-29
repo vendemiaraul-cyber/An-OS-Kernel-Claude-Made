@@ -5,9 +5,10 @@ A Netlify site with two apps:
 - **Kernel Lab** (`/kernel/`): boots **ConMon**, a tiny x86 OS written in C and
   C++, inside the [v86](https://github.com/copy/v86) emulator in your browser.
   You can also load your own Multiboot kernel, floppy image, ISO or disk image.
-  Inside ConMon, `install mp4` and `install llm` add a text-mode video player
-  and an AI chat: the page decodes video and runs WebLLM models on your GPU,
-  and streams the results into ConMon over its serial port.
+  Inside ConMon, `install llm` adds an AI chat (SmartestChild, Transformers.js,
+  WebLLM or Ollama) plus `mp finder` for model facts, and `install solMeteo`
+  adds live weather from Open-Meteo with an animated ASCII world map. The page
+  does the work and streams the results into ConMon over its serial port.
 - **YouTube Test** (`/youtube/`): search, trending, video stats and an embedded
   player through the **YouTube Data API v3**, with a request log for testing.
   The API key stays on the server inside a Netlify Function.
@@ -17,9 +18,10 @@ site/                      static site Netlify publishes
   index.html               landing page
   kernel/                  Kernel Lab (index.html + kernel.js)
   youtube/                 YouTube Test (index.html + youtube.js)
-  kernel/hostlink.js       host side of ConMon's packages (MP4, WebLLM)
+  kernel/hostlink.js       host side of ConMon's packages (llm, solMeteo)
+  kernel/smartestchild.js  the built-in SmartestChild chatbot
   kernels/                 bundled images: conmon.bin, hello-floppy.img
-  videos/                  the 4 ConMon explainer videos (used by install mp4)
+  meteo/                   world countries GeoJSON for the solMeteo map (public domain)
   v86/                     emulator (libv86.js, v86.wasm) + SeaBIOS/VGA BIOS
 netlify/functions/
   youtube.mjs              /api/youtube proxy that adds YOUTUBE_API_KEY
@@ -83,5 +85,9 @@ size and GPU features fit the device.
 - v86 by Fabian Hemmer and contributors, BSD-2-Clause (`site/v86/LICENSE-v86.txt`).
   Built from commit in `site/v86/VERSION.txt`.
 - SeaBIOS and VGA BIOS, LGPL-3.0 (`site/v86/LICENSE-seabios-LGPL.txt`).
+- World map: countries GeoJSON from johan/world.geo.json, public domain
+  (`site/meteo/LICENSE-countries-geojson.txt`), derived from Natural Earth.
+- Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0, free
+  for non-commercial use); place search based on GeoNames.
 - WebLLM by the MLC team, Apache-2.0, loaded from the esm.run CDN at runtime.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.

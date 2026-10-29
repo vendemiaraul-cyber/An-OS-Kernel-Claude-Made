@@ -12,8 +12,8 @@
     file: $("file"), drop: $("drop"), fileInfo: $("file-info"), url: $("url"),
     kind: $("kind"), ram: $("ram"),
     typebar: $("typebar"), typeInput: $("type-input"), chips: $("chips"),
-    pkgPanel: $("pkg-panel"), pkgMp4: $("pkg-mp4"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
-    pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"), sendMp4: $("send-mp4"), mp4File: $("mp4-file"),
+    pkgPanel: $("pkg-panel"), pkgMeteo: $("pkg-meteo"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
+    pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"),
     serial: $("serial"), serialClear: $("btn-serial-clear"),
   };
 
@@ -172,23 +172,15 @@
 
   const host = window.ConMonHost;
   host.onStateChange((st) => {
-    ui.pkgMp4.textContent = st.mp4 ? "installed" : "not installed";
-    ui.pkgMp4.className = "pill" + (st.mp4 ? " on" : "");
+    ui.pkgMeteo.textContent = st.meteo ? "installed" : "not installed";
+    ui.pkgMeteo.className = "pill" + (st.meteo ? " on" : "");
     ui.pkgLlm.textContent = st.llm ? "installed" : "not installed";
     ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
     ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
     ui.pkgModel.textContent = st.model ? "model: " + (st.modelLabel || st.model.replace(/-MLC$/, "")) : "no model loaded";
     ui.pkgBusy.textContent = st.busy ? "host: " + st.busy + "…" : "";
-    ui.sendMp4.disabled = !st.mp4;
   });
   host.checkGpu();
-  ui.sendMp4.addEventListener("click", () => ui.mp4File.click());
-  ui.mp4File.addEventListener("change", async () => {
-    const f = ui.mp4File.files[0];
-    ui.mp4File.value = "";
-    if (f) await host.addUserVideo(f);
-    ui.fit.focus({ preventScroll: true });
-  });
 
   async function stopEmulator() {
     host.detach();

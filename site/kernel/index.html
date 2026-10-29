@@ -109,10 +109,12 @@
             <button class="chip" data-cmd="uptime">uptime</button>
             <button class="chip" data-cmd="guess">guess</button>
             <button class="chip" data-cmd="crash">crash</button>
-            <button class="chip pkg" data-cmd="install mp4">install mp4</button>
-            <button class="chip pkg" data-cmd="play ep1.mp4">play ep1.mp4</button>
             <button class="chip pkg" data-cmd="install llm">install llm</button>
+            <button class="chip pkg" data-cmd="install llm all">install llm all</button>
             <button class="chip pkg" data-cmd="load">load</button>
+            <button class="chip pkg" data-cmd="mp finder">mp finder</button>
+            <button class="chip pkg" data-cmd="install solMeteo">install solMeteo</button>
+            <button class="chip pkg" data-cmd="Rome">Rome</button>
           </div>
         </div>
 
@@ -132,7 +134,7 @@
           <h2>Bundled kernels</h2>
           <div class="samples" id="samples">
             <button class="sample active" data-sample="conmon">
-              <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 60 KB</span>
+              <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 66 KB</span>
             </button>
             <button class="sample" data-sample="hello">
               <b>Hello boot sector</b><span>Floppy · 512 bytes of 16-bit real mode</span>
@@ -142,11 +144,7 @@
 
         <div class="panel" id="pkg-panel">
           <h2>Packages</h2>
-          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page decodes video and runs AI models, then streams the results back into the OS.</p>
-          <div class="pkg-row"><span class="mono">mp4</span><span class="pill" id="pkg-mp4">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install mp4</span>, then <span class="mono">play ep1.mp4</span>.</div>
-          <button class="btn" id="send-mp4" disabled style="width:100%">Send an MP4 to ConMon…</button>
-          <input type="file" id="mp4-file" accept="video/mp4,video/*" hidden>
+          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs AI models and fetches weather, then streams the results back into the OS.</p>
           <div class="pkg-row"><span class="mono">llm</span><span class="pill" id="pkg-llm">not installed</span></div>
           <div class="muted small">Type <span class="mono">install llm</span>, pick a model by its letter, then <span class="mono">load</span> to chat. Four engines:</div>
           <ul class="tips small" style="margin:0">
@@ -155,7 +153,10 @@
             <li><b>WebLLM</b>: bigger models (0.4-3.5 GB) on your GPU, needs WebGPU.</li>
             <li><b>Ollama</b>: models on your own PC. Set <span class="mono">OLLAMA_ORIGINS</span> to this site's address so the page may reach it.</li>
           </ul>
+          <div class="muted small"><span class="mono">install llm all</span> downloads every model at once. <span class="mono">mp finder</span> shows facts about each model, with live stats from Hugging Face or Ollama.</div>
           <div class="file-info"><span id="pkg-gpu">WebGPU: checking…</span> · <span id="pkg-model">no model loaded</span></div>
+          <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>.</div>
           <div class="file-info" id="pkg-busy" style="color:var(--accent)"></div>
         </div>
 
