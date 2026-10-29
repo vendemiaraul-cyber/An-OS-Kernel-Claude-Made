@@ -1,0 +1,11 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
+hostname -F /etc/hostname
+dmesg -n 1                      # keep kernel messages off the shell
+clear
+cat /etc/motd

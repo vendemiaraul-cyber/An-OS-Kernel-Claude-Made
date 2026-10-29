@@ -21,6 +21,8 @@
   // Bundled systems. All permissively licensed; see /guests/SOURCES.txt.
   const SAMPLES = {
     conmon: { name: "conmon.bin", url: "/kernels/conmon.bin", label: "ConMon" },
+    linux: { name: "linux.bzimage", url: "/guests/linux.bzimage", label: "Linux 6.6",
+      hint: "Linux 6.6 with BusyBox: a real shell. Try ls /, uname -a, top (q quits), vi notes.txt, or doom to open DOOM in a window." },
     mikeos: { name: "mikeos.flp", url: "/guests/mikeos.flp", label: "MikeOS 4.5",
       hint: "MikeOS: press Enter for the program menu, then Enter again to run DOOM.BAS (it is at the top). For the command line, press → then Enter at the welcome box." },
     tetros: { name: "tetros.img", url: "/guests/tetros.img", label: "Tetros",
@@ -36,7 +38,7 @@
   };
   let sample = "conmon";                 // bundled kernel used when no file/URL is chosen
   const FLOPPY_MAX = 2949120;            // 2.88 MB
-  const KIND_LABEL = { multiboot: "Multiboot kernel", fda: "floppy", cdrom: "CD-ROM", hda: "hard disk" };
+  const KIND_LABEL = { bzimage: "Linux bzImage", multiboot: "Multiboot kernel", fda: "floppy", cdrom: "CD-ROM", hda: "hard disk" };
 
   // Emulator files. The offline preview packs them into images.js instead.
   const packed = (name) => window.CONMON_IMAGES && window.CONMON_IMAGES.has(name);
@@ -105,12 +107,20 @@
     return String.fromCharCode(...b) === "CD001";
   }
 
+  // A Linux kernel: "HdrS" (the x86 boot protocol header) at 0x202.
+  function isBzImage(buf) {
+    if (buf.byteLength < 0x206) return false;
+    const u = new Uint8Array(buf, 0x202, 4);
+    return u[0] === 0x48 && u[1] === 0x64 && u[2] === 0x72 && u[3] === 0x53;
+  }
+
   function detectKind(name, buf) {
     const ext = (name.split(".").pop() || "").toLowerCase();
     if (isIso(buf) || ext === "iso") return "cdrom";
     const mb = hasMultibootHeader(buf);
     if (mb === 1) return "multiboot";
     if (mb === 2) throw new Error("This is a Multiboot2 kernel. v86 only boots Multiboot v1 kernels directly; wrap it in a GRUB ISO instead.");
+    if (isBzImage(buf)) return "bzimage";
     if (buf.byteLength <= FLOPPY_MAX) return "fda";
     return "hda";
   }

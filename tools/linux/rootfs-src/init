@@ -1,0 +1,3 @@
+#!/bin/sh
+# ConMon Lab Linux: hand over to BusyBox init, which reads /etc/inittab.
+exec /sbin/init

@@ -1,0 +1,11 @@
+This is a real Linux kernel (6.6, built for i386) with BusyBox as the
+userland, booted from a single bzImage file by the v86 emulator.
+The whole system is an initramfs in RAM.
+
+Things to try:
+  uname -a          kernel version
+  cat /proc/cpuinfo the emulated CPU
+  free -m           memory
+  top               processes (q quits)
+  vi notes.txt      the vi editor (Esc then :wq saves)
+  doom              opens DOOM in a window over this screen

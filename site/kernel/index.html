@@ -276,6 +276,9 @@
             <button class="sample active" data-sample="conmon">
               <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 66 KB</span>
             </button>
+            <button class="sample" data-sample="linux">
+              <b>Linux 6.6</b><span>bzImage · a real Linux kernel with a BusyBox shell · 1.5 MB</span>
+            </button>
             <button class="sample" data-sample="mikeos">
               <b>MikeOS 4.5</b><span>Floppy · a small OS with apps, BASIC, games and a DOOM launcher</span>
             </button>
@@ -295,7 +298,7 @@
               <b>Hello boot sector</b><span>Boot sector · ConMon Lab's own 16-bit demo</span>
             </button>
           </div>
-          <p class="muted small" style="margin:0">MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
+          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
         </div>
 
         <div class="panel" id="pkg-panel">
@@ -323,9 +326,9 @@
         <div class="panel">
           <h2>Load your own</h2>
           <label class="drop" id="drop">
-            <input type="file" id="file" hidden accept=".bin,.elf,.kernel,.img,.ima,.flp,.iso,.hdd,.raw,.vfd">
+            <input type="file" id="file" hidden accept=".bin,.elf,.kernel,.bzimage,.vmlinuz,.img,.ima,.flp,.iso,.hdd,.raw,.vfd">
             <div><strong>Choose a file</strong> or drop it here</div>
-            <div class="small" style="margin-top:4px">.bin / .elf · .img · .iso</div>
+            <div class="small" style="margin-top:4px">.bin / .elf · bzImage · .img · .iso</div>
           </label>
           <div class="file-info" id="file-info">No file chosen.</div>
 
@@ -341,6 +344,7 @@
               <select class="field" id="kind" style="width:100%">
                 <option value="auto">Auto-detect</option>
                 <option value="multiboot">Multiboot kernel</option>
+                <option value="bzimage">Linux kernel (bzImage)</option>
                 <option value="fda">Floppy image</option>
                 <option value="cdrom">CD-ROM (ISO)</option>
                 <option value="hda">Hard disk image</option>

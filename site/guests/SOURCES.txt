@@ -1,5 +1,11 @@
-Bundled guest operating systems in Kernel Lab (all permissively licensed):
+Bundled guest operating systems in Kernel Lab (free software; licences next to each):
 
+linux.bzimage  Linux 6.6 (i386) with a built-in initramfs, built by ConMon Lab
+  kernel   https://github.com/torvalds/linux  tag v6.6       licence GPL-2.0 (LICENSE-linux.txt)
+  busybox  https://github.com/mirror/busybox  tag 1_36_1     licence GPL-2.0 (LICENSE-busybox.txt)
+  musl     https://github.com/kraj/musl (mirror of git.musl-libc.org)  tag v1.2.5  licence MIT (LICENSE-musl.txt)
+  The exact configs, root filesystem files and build script are in the
+  ConMon Lab repo under tools/linux/ (sh tools/linux/build.sh rebuilds it).
 mikeos.flp  https://github.com/mig-hub/mikeOS  commit 685306a  licence BSD-3-Clause (LICENSE-*.txt)
 tetros.img  https://github.com/daniel-e/tetros  commit 924f0d7  licence MIT (LICENSE-*.txt)
 bootbasic.img  https://github.com/nanochess/bootBASIC  commit b2eba2b  licence BSD-2-Clause (LICENSE-*.txt)

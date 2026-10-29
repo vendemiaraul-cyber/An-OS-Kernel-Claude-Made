@@ -1,0 +1,5 @@
+#!/bin/sh
+# Asks ConMon Lab (the page around this PC) to open DOOM in a window,
+# using the same serial-port message as MikeOS's DOOM.BAS.
+printf '\033]CM;window.doom\007' > /dev/ttyS0
+echo "Opening DOOM in a window... (close it with the X or F12)"

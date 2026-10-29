@@ -34,7 +34,7 @@ def write_images():
         "conmon.bin": "kernels/conmon.bin", "hello-floppy.img": "kernels/hello-floppy.img",
     }
     for f in sorted(os.listdir(os.path.join(SITE, "guests"))):
-        if f.endswith((".img", ".flp")):
+        if f.endswith((".img", ".flp", ".bzimage")):
             files[f] = "guests/" + f
     entries = []
     for name, rel in files.items():
@@ -100,7 +100,7 @@ def main():
     body = re.sub(r'<footer class="wrap footer">.*?</footer>', '<footer class="wrap footer">ConMon Lab preview. The full site, with the YouTube Test app, lives on your Netlify deploy.</footer>', body, flags=re.S)
     note = ('<div class="preview-note"><b>Preview mode.</b> This copy runs without internet, so the AI chat offers '
             'SmartestChild only, and solMeteo shows <b>sample</b> weather for 2,582 built-in cities (try Rome, Bologna, Tokyo, or cities Italy). '
-            'Everything else is the real thing: boot MikeOS, Tetros and more from the list, <b>install doom</b> plays real DOOM on ConMon\'s screen, '
+            'Everything else is the real thing: boot <b>Linux 6.6</b>, MikeOS, Tetros and more from the list, <b>install doom</b> plays real DOOM on ConMon\'s screen, '
             'and MikeOS\'s DOOM.BAS opens DOOM in a window. '
             'On your Netlify site, doomy (Python via Pyodide), Transformers.js, WebLLM, Ollama, live Open-Meteo weather and mp finder\'s live stats also work.</div>')
     body = body.replace("</p>\n    </section>", "</p>\n      " + note + "\n    </section>", 1)

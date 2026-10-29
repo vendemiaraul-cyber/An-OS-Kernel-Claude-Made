@@ -13,8 +13,9 @@ A Netlify site with two apps:
   screen; `install doomy` plays doomy, a small DOOM-style game written in
   Python, run in the browser by Pyodide. The page does the work and streams
   the results into ConMon over its serial port.
-  The **Bundled kernels** list also boots MikeOS, Tetros, bootBASIC, bootOS and
-  SectorLISP on the main screen. MikeOS has a `DOOM.BAS` program at the top
+  The **Bundled kernels** list also boots a real **Linux 6.6** kernel with a
+  BusyBox shell (one 1.5 MB bzImage), MikeOS, Tetros, bootBASIC, bootOS and
+  SectorLISP on the main screen. You can drop in your own bzImage too. MikeOS has a `DOOM.BAS` program at the top
   of its menu: it can't run DOOM itself (it's 16-bit), so it asks the page,
   over the serial port, to open DOOM in a window.
 - **YouTube Test** (`/youtube/`): search, trending, video stats and an embedded
@@ -37,7 +38,8 @@ site/                      static site Netlify publishes
 netlify/functions/
   youtube.mjs              /api/youtube proxy that adds YOUTUBE_API_KEY
 os/                        ConMon source (C, C++, NASM) - see os/README.md
-tools/                     doom.bas (MikeOS DOOM launcher), fat12_add.py
+tools/                     doom.bas (MikeOS DOOM launcher), fat12_add.py,
+                           linux/ (configs, root files and build.sh for linux.bzimage)
 preview/                   builds the offline preview (python3 preview/build.py)
 netlify.toml
 ```
@@ -86,6 +88,17 @@ make samples       # rebuilds samples/hello-floppy.img
 cp conmon.bin ../site/kernels/conmon.bin
 ```
 
+## Rebuild the bundled Linux
+
+```sh
+sh tools/linux/build.sh     # clones Linux 6.6, BusyBox 1.36.1 and musl 1.2.5 from GitHub
+```
+
+It needs gcc with `-m32`, make, flex, bison, bc, perl, xz and git, takes a
+few minutes, and writes `site/guests/linux.bzimage`. Inside the Linux shell,
+`doom` sends the same serial message as MikeOS's DOOM.BAS and the page opens
+DOOM in a window.
+
 ## doomy on your PC
 
 `site/doomy/doomy.py` needs only Python 3 (no packages). In a terminal with
@@ -114,6 +127,8 @@ size and GPU features fit the device.
 - Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0, free
   for non-commercial use); place search based on GeoNames.
 - Cities: Natural Earth populated places, public domain (`site/meteo/LICENSE-natural-earth.txt`).
+- Linux kernel (GPL-2.0), BusyBox (GPL-2.0) and musl (MIT) in
+  `site/guests/linux.bzimage`; sources and build recipe in `tools/linux/`.
 - Bundled systems: MikeOS (BSD-3-Clause), Tetros (MIT), bootBASIC and bootOS
   by Oscar Toledo G. (BSD-2-Clause), SectorLISP (ISC). See `site/guests/`.
   The MikeOS floppy adds DOOM.BAS (`tools/doom.bas`).
