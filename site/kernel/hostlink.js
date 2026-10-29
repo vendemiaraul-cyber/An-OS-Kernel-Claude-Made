@@ -1,72 +1,22 @@
 // ConMon Lab - host link.
 //
 // ConMon talks to this page over its serial port (COM1). This file is the
-// "host" side: it installs packages, runs language models (SmartestChild,
-// Transformers.js, WebLLM or Ollama), looks up model info, and fetches weather
-// from Open-Meteo with an animated ASCII map, then streams it all back into
-// the OS.
+// "host" side: it installs packages, runs games (DOOM, doomy, PS2 games),
+// fetches weather from Open-Meteo with an animated ASCII map, then streams it
+// all back into the OS.
 //
 //   ConMon -> host:  ESC ] "CM;" <type> ";" <payload> BEL
 //   host -> ConMon:  STX <type> <len lo> <len hi> <payload bytes>
 (() => {
   "use strict";
 
-  const WEBLLM_URL = "https://esm.run/@mlc-ai/web-llm@0.2.86";
-  const TFJS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
-  const OLLAMA_URL = "http://localhost:11434";
-  // Offline preview (preview/preview-data.js): no internet, so only
-  // SmartestChild and a built-in city list with SAMPLE weather.
+  // Offline preview (preview/preview-data.js): no internet, so a built-in
+  // city list with SAMPLE weather.
   const PREVIEW = window.CONMON_PREVIEW || null;
-  // Transformers.js models (ONNX, 4-bit): [Hugging Face id, label, approx. download MB]
-  const TFJS_MODELS = [
-    ["onnx-community/LFM2.5-350M-ONNX", "LFM2.5 350M (tiny, fast)", 260],
-    ["HuggingFaceTB/SmolLM2-360M-Instruct", "SmolLM2 360M", 270],
-    ["onnx-community/Qwen2.5-0.5B-Instruct", "Qwen2.5 0.5B", 400],
-    ["onnx-community/Qwen3-0.6B-ONNX", "Qwen3 0.6B (best answers)", 570],
-  ];
-  // Model families offered, smallest first. The best quantisation that this
-  // device supports is picked from WebLLM's own model list at runtime.
-  const FAMILIES = [
-    ["SmolLM2-360M-Instruct", "SmolLM2 360M (tiny, fast)"],
-    ["Qwen2.5-0.5B-Instruct", "Qwen2.5 0.5B"],
-    ["Qwen3-0.6B", "Qwen3 0.6B"],
-    ["gemma3-1b-it", "Gemma 3 1B"],
-    ["Llama-3.2-1B-Instruct", "Llama 3.2 1B"],
-    ["TinyLlama-1.1B-Chat-v1.0", "TinyLlama 1.1B"],
-    ["Qwen2.5-1.5B-Instruct", "Qwen2.5 1.5B"],
-    ["SmolLM2-1.7B-Instruct", "SmolLM2 1.7B"],
-    ["Qwen3-1.7B", "Qwen3 1.7B"],
-    ["Llama-3.2-3B-Instruct", "Llama 3.2 3B"],
-    ["Phi-3.5-mini-instruct", "Phi 3.5 mini"],
-    ["Qwen3-4B", "Qwen3 4B (best answers)"],
-  ];
-  // Every model is told who really made it, so it never claims ConMon did:
-  // ConMon only runs the model and shows its words on screen.
-  function systemPromptFor(id) {
-    const { name } = engineOf(id);
-    const m = lastModels.find((x) => x.id === id) || { id, label: engineOf(id).model };
-    const maker = catalogFor(m).maker;
-    const where = name === "ollama" ? "with Ollama on the user's own PC" : "in the user's web browser";
-    return [
-      `You are ${m.label}, a language model made by ${maker || "your original developer"}.`,
-      `You are running ${where} and chatting through ConMon, a tiny hobby operating system shown on an 80-column text screen.`,
-      `ConMon and ConMon Lab did not make, train or fine-tune you; they only display your answers.`,
-      maker ? `If asked who made or trained you, say ${maker}.` : "If asked who made or trained you, name your real developer, never ConMon.",
-      "Answer in plain text without markdown tables or emoji, and keep answers short unless asked for detail.",
-      "When asked for code or a file, write the complete code in a fenced block whose first line names the language and a file name, like ```html index.html",
-    ].join(" ");
-  }
-  const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ||
-    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);     // iPadOS says "Macintosh"
-  // On phones a browser model's memory is never fully given back (WebAssembly
-  // memory can't shrink), so a second load in the same page can crash the tab.
-  let phoneModelLoaded = "", phoneLoadFailed = false;
-  let onReloadNeeded = null;
   let emu = null;
   let onState = () => {};
   let onWindow = null;
-  let onPreview = null;
-  const state = { meteo: false, llm: false, doom: false, doomy: false, nativedoom: false, game: "", gpu: "unknown", model: null, modelLabel: "", busy: "" };
+  const state = { meteo: false, doom: false, doomy: false, nativedoom: false, ps2: false, game: "", busy: "" };
 
   // ------------------------------------------------------------ framing
 
@@ -127,41 +77,19 @@
 
   // -------------------------------------------------------- dispatcher
 
-  // One job at a time for the AI engines: two models loading at once can run
-  // the GPU or the tab out of memory. A keep-alive packet ('K') goes out every
-  // few seconds while a job runs, so ConMon can tell a slow job from a dead page.
-  let llmQueue = Promise.resolve();
+  // A keep-alive packet ('K') goes out every few seconds while a job runs, so
+  // ConMon can tell a slow job from a dead page.
   let jobDepth = 0, keepAlive = 0;
   function jobStarted() { if (jobDepth++ === 0) keepAlive = setInterval(() => send("K", ""), 4000); }
   function jobEnded() { if (jobDepth > 0 && --jobDepth === 0) clearInterval(keepAlive); }
-  const LLM_JOBS = new Set(["llm.check", "llm.models", "llm.download", "llm.load", "llm.fetch", "llm.chat", "llm.info"]);
-
-  // A job that never finishes (a stuck GPU, say) must not block the queue
-  // for good: after a cancel or an unhandled error, waiting jobs may start.
-  const gates = new Set();
-  function releaseQueue() {
-    for (const open of gates) open();
-    gates.clear();
-    jobDepth = 0;                       // an abandoned job no longer counts as alive
-    clearInterval(keepAlive);
-  }
-  function handle(msg) {
-    const i = msg.indexOf(";");
-    const type = i < 0 ? msg : msg.slice(0, i);
-    if (!LLM_JOBS.has(type)) return run(msg);
-    let open;
-    const gate = new Promise((r) => { open = r; });
-    gates.add(open);
-    const job = llmQueue.then(() => run(msg));
-    llmQueue = Promise.race([job.catch(() => {}), gate]).then(() => gates.delete(open));
-    return job;
-  }
+  function releaseQueue() { jobDepth = 0; clearInterval(keepAlive); }
+  const handle = (msg) => run(msg);
 
   async function run(msg) {
     const i = msg.indexOf(";");
     const type = i < 0 ? msg : msg.slice(0, i);
     const arg = i < 0 ? "" : msg.slice(i + 1);
-    const long = type !== "hello" && type !== "cancel" && !type.endsWith(".k") && type !== "game.ack" && type !== "llm.stop";
+    const long = type !== "hello" && type !== "cancel" && !type.endsWith(".k") && type !== "game.ack";
     if (long) jobStarted();
     try {
       switch (type) {
@@ -171,23 +99,13 @@
           else if (arg === "doom") await installDoom();
           else if (arg === "doomy") await installDoomy();
           else if (arg === "nativedoom") await installNativeDoom();
-          else if (arg === "llm") await installLlm();
+          else if (arg === "ps2") await installPs2();
           else sendText("E", `Unknown package ${arg}`);
           break;
         case "cancel":
           cancelled = true;
           setTimeout(() => releaseQueue(), 3000);
-          if (loading === "webllm" && engine) engine.unload().catch(() => {});
           break;
-        case "llm.models": await listModels(); break;
-        case "llm.download": case "llm.load": await loadModel(arg); break;
-        case "llm.fetch": await loadModel(arg, { fetchOnly: true }); break;
-        case "llm.chat": await chat(arg); break;
-        case "llm.stop": stopGeneration(); break;
-        case "llm.haiku": await setHaiku(arg); break;
-        case "llm.check": await checkSetup(); break;
-        case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
-        case "llm.info": await modelInfo(arg); break;
         case "meteo.show": await showMeteo(arg); break;
         case "meteo.cities": await listCities(arg); break;
         case "doom.start": await startDoom(); break;
@@ -201,6 +119,8 @@
         case "window.doom": if (onWindow) onWindow("doom"); break;
         case "window.android": if (onWindow) onWindow("android"); send("D", ""); break;
         case "apple.info": appleInfo(); break;
+        case "ps2.run": await runPs2(arg); break;
+        case "ps2.list": await listPs2(); break;
         case "meteo.stop": meteoRun++; setBusy(""); break;
         default: break;
       }
@@ -213,11 +133,10 @@
     }
   }
 
-  // Turns engine errors into something a person can act on.
+  // Turns errors into something a person can act on.
   function explain(err) {
     const m = (err && err.message ? err.message : String(err)) || "Unknown error";
-    if (/\bquota\b|QuotaExceeded|no space left/i.test(m)) return "The browser ran out of storage for models. Free some space or delete a model, then try again.";
-    if (/device (was )?lost|GPUDeviceLostInfo|out of memory|\bOOM\b|failed to allocate|allocation failed/i.test(m)) return "The graphics card ran out of memory. Reload the page and pick a smaller model.";
+    if (/\bquota\b|QuotaExceeded|no space left/i.test(m)) return "The browser ran out of storage. Free some space and try again.";
     if (/Failed to fetch|NetworkError|Load failed|net::ERR_/i.test(m)) return "A download failed. Check your internet connection and try again.";
     if (/Cancelled/i.test(m)) return "Cancelled.";
     return m;
@@ -255,736 +174,55 @@
     return new Blob(parts, { type: res.headers.get("content-type") || "application/octet-stream" });
   }
 
-  // ---------------------------------------------------------------- llm
+  // ---------------------------------------------------------------- ps2
   //
-  // Four engines, all behind the same ConMon commands (models / load):
-  //   smartest  SmartestChild, a built-in rule-based chatbot (instant, any device)
-  //   tfjs      Transformers.js: ONNX models in this tab, WebGPU or WebAssembly
-  //   webllm    WebLLM: MLC models on WebGPU (fastest in the browser)
-  //   ollama    Ollama: models running on the user's own PC (localhost:11434)
-  // Model ids sent to ConMon are "<engine>:<model>".
+  // PS2 games run in Play!, the open-source PS2 emulator, on /ps2/ (a page
+  // of its own: it needs cross-origin isolation for its threads). ConMon
+  // lists them and picks one; this page opens a window that starts it.
 
-  let webllm = null, engine = null, history = [];
-  let tfjs = null, tfjsPipe = null, tfjsModel = "", tfjsStopper = null;
-  let ollamaAbort = null, smartestStop = false;
-  const smartestMemory = {};
-  let adapterInfo = null;
-
-  async function gpuAdapter() {
-    if (!("gpu" in navigator) || !navigator.gpu) return null;
-    try { return await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }); } catch (_) { return null; }
-  }
-
-  async function checkGpu() {
-    const a = await gpuAdapter();
-    state.gpu = a ? "available" : "not available";
-    onState(state);
-    return a;
-  }
-
-  function engineOf(id) {
-    const i = String(id).indexOf(":");
-    return i < 0 ? { name: "webllm", model: id } : { name: id.slice(0, i), model: id.slice(i + 1) };
-  }
-
-  function mbText(mb) { return mb >= 1000 ? (mb / 1000).toFixed(1) + " GB" : Math.round(mb) + " MB"; }
-
-  async function ollamaTags(timeoutMs) {
-    const res = await fetch(OLLAMA_URL + "/api/tags", { signal: AbortSignal.timeout(timeoutMs || 1500) });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    return (data.models || []).filter((m) => !/embed/i.test(m.name));
-  }
-
-  function ollamaHelp() {
-    return [
-      "Ollama: not reachable at localhost:11434. To use models on your PC:",
-      "  1. Install Ollama from ollama.com and run: ollama pull llama3.2",
-      `  2. Allow this page: set OLLAMA_ORIGINS=${location.origin}`,
-      "     and restart Ollama. Then type models again.",
-    ];
-  }
-
-  async function installLlm() {
-    setBusy("installing llm");
-    if (PREVIEW) {
-      progress(100, "SmartestChild ready");
-      sendText("M", "Engines:\n  SmartestChild    built in, ready\n" +
-        "This preview has no internet, so Transformers.js, WebLLM and Ollama are\n" +
-        "switched off here. All four work on your Netlify site.");
-      state.llm = true;
-      setBusy("");
-      send("D", "llm");
-      return;
+  let ps2Games = null;
+  async function ps2List() {
+    if (!ps2Games) {
+      const res = await fetch("/ps2/games.json");
+      if (!res.ok) throw new Error("Couldn't load the PS2 game list.");
+      ps2Games = (await res.json()).games;
     }
-    progress(10, "Starting SmartestChild");
-    if (!window.SmartestChild) throw new Error("SmartestChild is missing from this page.");
-    progress(40, "Looking for a WebGPU graphics card");
-    const adapter = await checkGpu();
-    adapterInfo = adapter ? adapter.info || {} : null;
-    progress(70, "Looking for Ollama on this PC");
-    let ollama = null;
-    try { ollama = await ollamaTags(1200); } catch (_) { ollama = null; }
-    progress(100, "Engines checked");
-    const gpuName = adapter ? ([adapterInfo.vendor, adapterInfo.architecture].filter(Boolean).join(" ") || "WebGPU device") : "";
-    const lines = [
-      "Engines:",
-      "  SmartestChild    built in, ready",
-      "  Transformers.js  " + (adapter ? `in this tab on your GPU (${gpuName})` : "in this tab on the CPU (WebAssembly, slower)"),
-      "  WebLLM           " + (adapter ? `in this tab on your GPU, half precision: ${adapter.features.has("shader-f16") ? "yes" : "no"}` : "needs WebGPU (Chrome or Edge), not available here"),
-      "  Ollama           " + (ollama ? `found on this PC with ${ollama.length} model${ollama.length === 1 ? "" : "s"}` : "not running on this PC (optional)"),
-    ];
-    sendText("M", lines.join("\n"));
-    state.llm = true;
-    setBusy("");
-    send("D", "llm");
+    return ps2Games;
   }
-
-  async function webllmModels(adapter) {
-    if (!webllm) webllm = await import(WEBLLM_URL);
-    const f16 = adapter.features.has("shader-f16");
-    const maxStorage = adapter.limits.maxStorageBufferBindingSize || 0;
-    const mobile = MOBILE;
-    const mem = navigator.deviceMemory || 8;          // browsers report at most 8
-    // Stay well under the machine's memory: the model, its cache and the page share it.
-    const budgetMB = mobile ? 700 : mem <= 2 ? 900 : mem <= 4 ? 1800 : 3500;
-    const byId = new Map(webllm.prebuiltAppConfig.model_list.map((m) => [m.model_id, m]));
-    const out = [];
-    for (const [family, label] of FAMILIES) {
-      const ids = f16 ? [`${family}-q4f16_1-MLC`, `${family}-q4f32_1-MLC`] : [`${family}-q4f32_1-MLC`];
-      for (const id of ids) {
-        const m = byId.get(id);
-        if (!m) continue;
-        const needs = new Set(m.required_features || []);
-        if (/f16/.test(id)) needs.add("shader-f16");
-        if ([...needs].some((f) => !adapter.features.has(f))) continue;
-        if ((m.vram_required_MB || 0) > budgetMB) continue;
-        if (mobile && !m.low_resource_required) continue;
-        if (m.buffer_size_required_bytes && maxStorage && m.buffer_size_required_bytes > maxStorage) continue;
-        let cached = false;
-        try { cached = await webllm.hasModelInCache(id); } catch (_) {}
-        out.push({ id: "webllm:" + id, label, size: mbText(m.vram_required_MB || 0), status: cached ? "downloaded" : "" });
-        break;
-      }
+  function ps2Lines(games) {
+    const lines = ["PS2 games (run in Play!, the open-source PS2 emulator):"];
+    for (const g of games) {
+      lines.push(`  ${g.letter}  ${g.name.padEnd(12)} ${g.by}`);
+      if (g.needs) lines.push(`     needs ${g.needs.what}`);
     }
-    return out;
-  }
-
-  async function tfjsCached(model) {
-    try {
-      const cache = await caches.open("transformers-cache");
-      const keys = await cache.keys();
-      return keys.some((r) => r.url.includes("/" + model + "/"));
-    } catch (_) { return false; }
-  }
-
-  let lastModels = [];
-  // Builds the model list across engines. Setup hints go to notes.
-  async function gatherModels(notes = []) {
-    const adapter = await gpuAdapter();
-    const groups = [];
-
-    groups.push({ engine: "SmartestChild - scripted retro chatbot (rules, no AI model)", models: [
-      { id: "smartest:child", label: "SmartestChild (scripted)", size: "built in", status: "ready" },
-    ] });
-    if (PREVIEW) {
-      notes.push("Preview: only SmartestChild runs here. The other engines need internet.");
-      return finishList(groups);
-    }
-
-    const tf = [];
-    for (const [model, label, mb] of TFJS_MODELS) {
-      if (!adapter && mb > 450) continue;               // keep CPU-only devices to the small ones
-      tf.push({ id: "tfjs:" + model, label, size: "~" + mbText(mb), status: (await tfjsCached(model)) ? "downloaded" : "" });
-    }
-    groups.push({ engine: "Transformers.js - in this tab, " + (adapter ? "on your GPU" : "on the CPU (slower)"), models: tf });
-
-    if (adapter) {
-      try {
-        const w = await webllmModels(adapter);
-        if (w.length) groups.push({ engine: "WebLLM - in this tab on your GPU, fastest", models: w });
-      } catch (err) {
-        notes.push("WebLLM: couldn't load its model list (" + (err.message || err) + ").");
-      }
-    } else {
-      notes.push("WebLLM: needs WebGPU (Chrome or Edge on a computer), so it's hidden here.");
-    }
-
-    try {
-      const tags = await ollamaTags(1500);
-      if (tags.length) {
-        groups.push({ engine: "Ollama - on your PC (localhost:11434)", models: tags.map((t) => ({
-          id: "ollama:" + t.name,
-          label: t.name.replace(/:latest$/, "") + (t.details && t.details.parameter_size ? " " + t.details.parameter_size : ""),
-          size: mbText((t.size || 0) / 1e6),
-          status: "on your PC",
-        })) });
-      } else {
-        notes.push("Ollama: running, but no models yet. On your PC run: ollama pull llama3.2");
-      }
-    } catch (_) {
-      notes.push(...ollamaHelp());
-    }
-
-    return finishList(groups);
-  }
-
-  function finishList(groups) {
-    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lines = [];
-    lastModels = [];
-    for (const g of groups) {
-      for (const m of g.models) {
-        if (lines.length >= letters.length) break;
-        lines.push(`${letters[lines.length]}|${m.id}|${m.size}|${m.label}|${m.status}|${g.engine}`);
-        lastModels.push(m);
-      }
-    }
+    lines.push("Type run game <letter> to play, e.g. run game A");
     return lines;
   }
-
-  async function listModels() {
-    setBusy("checking models");
-    const notes = [];
-    const lines = await gatherModels(notes);
-    for (const n of notes) sendText("M", n);
+  async function installPs2() {
+    if (PREVIEW) throw new Error("The PS2 emulator needs your Netlify site; this offline preview can't run it.");
+    setBusy("installing ps2");
+    const games = await ps2List();
+    progress(40, "Checking the Play! PS2 emulator");
+    const built = await fetch("/ps2/emu/Play.wasm", { method: "HEAD" }).catch(() => null);
+    progress(100, built && built.ok ? "Play! PS2 emulator ready" : "Play! not built yet");
+    for (const l of ps2Lines(games)) sendText("M", l);
+    if (!(built && built.ok)) sendText("M", "(The emulator files are still being built on GitHub; games open once they are.)");
+    state.ps2 = true;
     setBusy("");
-    sendText("L", lines.join("\n"));
+    send("D", "ps2");
   }
-
-  function labelFor(id) {
-    const m = lastModels.find((x) => x.id === id);
-    return m ? m.label : engineOf(id).model;
-  }
-
-  let loading = "";
-
-  async function freeEngines(keep) {
-    if (keep !== "webllm" && engine) { try { await engine.unload(); } catch (_) {} if (state.model && engineOf(state.model).name === "webllm") state.model = null; }
-    if (keep !== "tfjs" && tfjsPipe) { try { await tfjsPipe.dispose(); } catch (_) {} tfjsPipe = null; tfjsModel = ""; if (state.model && engineOf(state.model).name === "tfjs") state.model = null; }
-  }
-
-  // Free browser storage, in MB (null if the browser won't say).
-  async function freeStorageMB() {
-    try {
-      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-      const e = await navigator.storage.estimate();
-      return e && e.quota ? (e.quota - (e.usage || 0)) / 1e6 : null;
-    } catch (_) { return null; }
-  }
-
-  async function loadModel(id, opts = {}) {
-    const { name, model } = engineOf(id);
-    if (!opts.fetchOnly && state.model === id && (name !== "webllm" || engine) && (name !== "tfjs" || tfjsPipe)) { send("D", ""); return; }
-    cancelled = false;
-    setBusy((opts.fetchOnly ? "downloading " : "loading ") + labelFor(id));
-    const listed = lastModels.find((x) => x.id === id);
-    if ((name === "tfjs" || name === "webllm") && listed && !listed.status) {
-      const free = await freeStorageMB(), needMB = parseFloat(String(listed.size).replace(/[^0-9.]/g, "")) * (/GB/.test(listed.size) ? 1000 : 1);
-      if (free !== null && needMB && free < needMB * 1.1)
-        throw new Error(`Not enough browser storage: ${mbText(free)} free, ${listed.label} needs about ${listed.size}.`);
-    }
-    if (MOBILE && (name === "tfjs" || name === "webllm")) {
-      if (opts.fetchOnly) throw new Error("On a phone, download one model at a time: type models and pick one.");
-      if (phoneModelLoaded && (phoneModelLoaded !== id || phoneLoadFailed)) {
-        if (onReloadNeeded) onReloadNeeded();
-        throw new Error(phoneLoadFailed
-          ? "The last try still holds the phone's memory, so trying again here would crash. Tap Reload on the page, then try once more."
-          : "On a phone, a second model in the same page can crash the browser. Tap Reload on the page (or reload it), then load this model.");
-      }
-      phoneModelLoaded = id;               // set before loading: a failed load still holds memory
-    }
-    if (name === "tfjs" || name === "webllm") await freeEngines(name);
-    loading = name;
-    try {
-      await loadEngine(id, name, model);
-    } catch (err) {
-      if (MOBILE && !cancelled) { phoneLoadFailed = true; if (onReloadNeeded) onReloadNeeded(); }
-      if (name === "webllm") { try { await engine.unload(); } catch (_) {} engine = null; }
-      if (name === "tfjs") tfjsPipe = null;
-      if (state.model === id) state.model = null;
-      throw cancelled ? new Error("Cancelled.") : err;
-    } finally {
-      loading = "";
-    }
-    if (opts.fetchOnly) {
-      // install llm all: keep the files, free the memory for the next one.
-      await freeEngines("");
-      const m = lastModels.find((x) => x.id === id);
-      if (m) m.status = "downloaded";
-      setBusy("");
-      send("D", "");
-      return;
-    }
-    state.model = id;
-    state.modelLabel = labelFor(id);
-    history = [];
-    const m = lastModels.find((x) => x.id === id) || { id, label: labelFor(id) };
-    const maker = catalogFor(m).maker;
-    if (name !== "smartest") sendText("M", `${labelFor(id)}: made by ${maker || "its original developer"}, run here by ${ENGINE_NAME[name] || name}.`);
-    setBusy("");
+  async function listPs2() {
+    for (const l of ps2Lines(await ps2List())) sendText("M", l);
     send("D", "");
   }
-
-  async function loadEngine(id, name, model) {
-
-    if (name === "smartest") {
-      progress(100, "SmartestChild is built in");
-    } else if (name === "ollama") {
-      progress(30, "Asking Ollama on your PC");
-      let tags;
-      try { tags = await ollamaTags(2500); } catch (_) { throw new Error("Ollama isn't reachable at localhost:11434. Is it running, with OLLAMA_ORIGINS set?"); }
-      if (!tags.some((t) => t.name === model)) throw new Error(`Ollama doesn't have ${model}. On your PC run: ollama pull ${model}`);
-      progress(100, "Ollama is ready");
-    } else if (name === "tfjs") {
-      if (!tfjs) { progress(2, "Downloading Transformers.js"); tfjs = await import(TFJS_URL); }
-      // Phones get the CPU (WebAssembly): WebGPU there tends to run out of memory.
-      const adapter = MOBILE ? null : await gpuAdapter();
-      const device = adapter ? "webgpu" : "wasm";
-      const dtypes = adapter && adapter.features.has("shader-f16") ? ["q4f16", "q4"] : ["q4"];
-      const files = {};
-      const report = (p) => {
-        if (cancelled) throw new Error("Cancelled.");
-        if (p.status === "progress" && p.file) {
-          files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
-          const all = Object.values(files);
-          const total = all.reduce((s, f) => s + f.total, 0), loaded = all.reduce((s, f) => s + f.loaded, 0);
-          progress(total ? (loaded / total) * 95 : 5, `Downloading ${Math.round(total / 1e6)} MB`);
-        } else if (p.status === "ready") progress(97, device === "webgpu" ? "Loading onto the GPU" : "Loading into memory");
-      };
-      if (tfjsPipe && tfjsPipe.dispose) { try { await tfjsPipe.dispose(); } catch (_) {} }
-      tfjsPipe = null;
-      let lastErr = null;
-      for (const dtype of dtypes) {                 // not every model ships every format
-        try {
-          tfjsPipe = await tfjs.pipeline("text-generation", model, { device, dtype, progress_callback: report });
-          break;
-        } catch (err) {
-          lastErr = err;
-          if (cancelled || !/locate|404|not found/i.test(String(err && err.message))) throw err;
-        }
-      }
-      if (!tfjsPipe) throw lastErr || new Error("Couldn't load " + model);
-      tfjsModel = model;
-    } else if (name === "webllm") {
-      if (!webllm) webllm = await import(WEBLLM_URL);
-      const report = (r) => {
-        if (cancelled) return;
-        const text = (r.text || "").replace(/\s+/g, " ");
-        const m = /(\d+)MB/i.exec(text);
-        progress((r.progress || 0) * 100, /Fetching|Loading model from cache/i.test(text) ? (m ? `Downloading ${m[1]} MB` : "Downloading") : "Loading onto the GPU");
-      };
-      if (!engine) engine = new webllm.MLCEngine({ initProgressCallback: report });
-      else engine.setInitProgressCallback(report);
-      await engine.reload(model);
-      if (cancelled) throw new Error("Cancelled.");
-    } else {
-      throw new Error("Unknown engine " + name);
-    }
-  }
-
-  // Streams text to ConMon in small batches and hides <think>...</think>.
-  function makeStreamer() {
-    let pending = "", lastSend = 0, inThink = false, reply = "";
-    const flush = () => { if (pending) { sendText("T", pending); pending = ""; } lastSend = performance.now(); };
-    return {
-      push(piece) {
-        let s = piece, visible = "";
-        while (s) {
-          if (inThink) {
-            const e = s.indexOf("</think>");
-            if (e < 0) s = ""; else { s = s.slice(e + 8); inThink = false; }
-          } else {
-            const b = s.indexOf("<think>");
-            if (b < 0) { visible += s; s = ""; } else { visible += s.slice(0, b); s = s.slice(b + 7); inThink = true; }
-          }
-        }
-        if (!reply) visible = visible.replace(/^\s+/, "");
-        if (!visible) return;
-        reply += visible; pending += visible;
-        if (performance.now() - lastSend > 60) flush();
-      },
-      done() { flush(); return reply; },
-    };
-  }
-
-  function stopGeneration() {
-    smartestStop = true;
-    if (engine && engineOf(state.model || "").name === "webllm") engine.interruptGenerate();
-    if (tfjsStopper) tfjsStopper.interrupt();
-    if (ollamaAbort) ollamaAbort.abort();
-  }
-
-  async function chat(text) {
-    if (!state.model) { sendText("E", "No model is loaded. Type load to load it again, or models to pick one."); return; }
-    const { name, model } = engineOf(state.model);
-    history.push({ role: "user", content: text });
-    if (history.length > 16) history = history.slice(-16);
-    const messages = [{ role: "system", content: systemPromptFor(state.model) }, ...history];
-    setBusy("thinking");
-    const out = makeStreamer();
-
-    if (name === "smartest") {
-      smartestStop = false;
-      const answer = window.SmartestChild.reply(text, smartestMemory);
-      await new Promise((r) => setTimeout(r, 250));               // "is typing..."
-      for (let i = 0; i < answer.length && !smartestStop; i += 3) {
-        out.push(answer.slice(i, i + 3));
-        await new Promise((r) => setTimeout(r, 18));
-      }
-    } else if (name === "tfjs") {
-      if (!tfjsPipe || tfjsModel !== model) throw new Error("The model isn't loaded. Type load to load it again.");
-      tfjsStopper = tfjs.InterruptableStoppingCriteria ? new tfjs.InterruptableStoppingCriteria() : null;
-      const streamer = new tfjs.TextStreamer(tfjsPipe.tokenizer, {
-        skip_prompt: true, skip_special_tokens: true, callback_function: (t) => out.push(t),
-      });
-      // Qwen3 thinks out loud by default; /no_think asks it to answer directly.
-      const msgs = /qwen3/i.test(model)
-        ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, content: m.content + " /no_think" } : m))
-        : messages;
-      const opts = { max_new_tokens: 768, do_sample: false, streamer };
-      if (tfjsStopper) opts.stopping_criteria = tfjsStopper;
-      await tfjsPipe(msgs, opts);
-      tfjsStopper = null;
-    } else if (name === "webllm") {
-      if (!engine) throw new Error("The model isn't loaded. Type load to load it again.");
-      const request = { messages, stream: true, temperature: 0.7, max_tokens: 1024 };
-      if (/^Qwen3/i.test(model)) request.extra_body = { enable_thinking: false };
-      const stream = await engine.chat.completions.create(request);
-      for await (const chunk of stream) {
-        out.push((chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content) || "");
-      }
-    } else if (name === "ollama") {
-      ollamaAbort = new AbortController();
-      let res;
-      try {
-        res = await fetch(OLLAMA_URL + "/api/chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model, messages, stream: true, think: false }),
-          signal: ollamaAbort.signal,
-        });
-      } catch (err) {
-        ollamaAbort = null;
-        if (err.name === "AbortError") { out.done(); history.pop(); setBusy(""); send("X", ""); return; }
-        throw new Error("Lost contact with Ollama at localhost:11434.");
-      }
-      if (!res.ok) { ollamaAbort = null; throw new Error(`Ollama answered ${res.status}: ${(await res.text()).slice(0, 100)}`); }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let nl;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (!line) continue;
-            const msg = JSON.parse(line);
-            if (msg.error) throw new Error("Ollama: " + msg.error);
-            if (msg.message && msg.message.content) out.push(msg.message.content);
-          }
-        }
-      } catch (err) {
-        if (err.name !== "AbortError") throw err;
-      } finally {
-        ollamaAbort = null;
-      }
-    }
-
-    const reply = out.done();
-    history.push({ role: "assistant", content: reply });
-    let final = reply;
-    if (haikuOn && !PREVIEW) {
-      const better = await haikuAdvance(text, reply);
-      if (better) final = better;
-    }
-    deliverFiles(final);
-    setBusy("");
-    send("X", "");
-  }
-
-  // ------------------------------------------------------ Haiku advancement
-  //
-  // After the local model answers, Claude Haiku 5.5 (Anthropic) checks the
-  // answer, fixes mistakes and writes better code. It runs through this
-  // site's /api/claude function (key on Netlify) or, failing that, straight
-  // from the browser with a key saved on this page.
-
-  const HAIKU_MODEL = "claude-haiku-5-5";
-  let haikuOn = true, haikuReady = null, haikuWarned = false;
-
-  function browserKey() { try { return localStorage.getItem("conmon.anthropicKey") || ""; } catch (_) { return ""; } }
-
-  async function haikuRoute() {
-    if (PREVIEW) return null;
-    if (haikuReady !== null) return haikuReady;
-    try {
-      const r = await fetch("/api/claude", { signal: AbortSignal.timeout(4000) });
-      const d = r.ok ? await r.json() : null;
-      if (d && d.ready) return (haikuReady = "site");
-    } catch (_) {}
-    return (haikuReady = browserKey() ? "browser" : false);
-  }
-
-  async function callHaiku(system, messages) {
-    const route = await haikuRoute();
-    if (!route) throw new Error("NOKEY");
-    if (route === "site") {
-      const r = await fetch("/api/claude", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ system, messages, max_tokens: 4096 }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d.error || "Claude answered") + " (" + r.status + ")");
-      return d.text || "";
-    }
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": browserKey(), "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: 4096, system, messages }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error((d.error && d.error.message) || "Claude answered " + r.status);
-    return (d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-  }
-
-  async function haikuAdvance(question, draft) {
-    const m = lastModels.find((x) => x.id === state.model) || { id: state.model, label: labelFor(state.model) };
-    const maker = catalogFor(m).maker || "its developer";
-    const system = [
-      "You are Claude Haiku 5.5, made by Anthropic, working as the 'Haiku advancement' in ConMon Lab.",
-      `A small local model, ${m.label} (made by ${maker}), has just answered the user inside ConMon, a hobby OS with an 80-column text screen.`,
-      "Check that answer. Correct any mistakes, fill in what is missing and give the best complete answer.",
-      "If the draft is already right, confirm it in a sentence and add anything important.",
-      "Use plain text; no markdown headings, tables or emoji.",
-      "When code or a file is wanted, write complete, working code in fenced blocks whose first line is the language and a file name, like ```html index.html.",
-      "For a web page, put the HTML, CSS and JavaScript in one index.html unless the user asks for separate files.",
-    ].join(" ");
-    const past = history.slice(0, -2).slice(-10);
-    const messages = [...past, { role: "user", content: `${question}\n\n[Draft answer from ${m.label}]\n${draft || "(no answer)"}` }];
-    while (messages.length && messages[0].role !== "user") messages.shift();
-    try {
-      setBusy("Haiku advancement");
-      const better = (await callHaiku(system, messages)).trim();
-      if (!better) return null;
-      sendText("T", "\n\n[Haiku advancement - Claude Haiku 5.5 by Anthropic]\n");
-      for (let i = 0; i < better.length; i += 600) sendText("T", better.slice(i, i + 600));
-      return better;
-    } catch (err) {
-      if (err.message === "NOKEY") {
-        if (!haikuWarned) sendText("M", "Haiku advancement: add a Claude API key in the page's Packages panel (or ANTHROPIC_API_KEY on Netlify) to turn it on.");
-        haikuWarned = true;
-      } else if (/401|403|invalid.*key|x-api-key|authentication/i.test(err.message)) {
-        haikuOn = false;
-        sendText("M", "Haiku advancement: Anthropic rejected the Claude API key (" + (err.message || "401").slice(0, 60) + "). Check ANTHROPIC_API_KEY on Netlify or the key on this page. Turned off for now.");
-      } else {
-        sendText("M", "Haiku advancement failed: " + explain(err).slice(0, 120));
-      }
-      return null;
-    }
-  }
-
-  async function setHaiku(arg) {
-    const a = String(arg || "").toLowerCase();
-    if (a === "on") haikuOn = true;
-    else if (a === "off") haikuOn = false;
-    haikuReady = null;
-    const route = await haikuRoute();
-    const how = route === "site" ? "this site's key" : route === "browser" ? "the key saved on this page" : "no key yet (add one in the Packages panel)";
-    sendText("M", PREVIEW ? "Haiku advancement needs internet, so it is off in this preview."
-      : `Haiku advancement is ${haikuOn ? "ON" : "OFF"}: Claude Haiku 5.5 ${haikuOn ? "checks" : "won't check"} each answer. Using ${how}.`);
-  }
-
-  // ------------------------------------------------------ models check
-  //
-  // `models check` in ConMon: tests everything a model download needs on
-  // this device and says, line by line, what works and what doesn't.
-
-  async function checkSetup() {
-    setBusy("checking this device");
-    const line = (ok, text) => sendText("M", (ok === true ? "  OK    " : ok === false ? "  FAIL  " : "  NOTE  ") + text);
-    const timed = async (fn, ms) => Promise.race([fn(), new Promise((_, no) => setTimeout(() => no(new Error("timed out after " + ms / 1000 + " s")), ms))]);
-    sendText("M", "Checking what AI models need on this device:");
-    if (PREVIEW) { line(null, "This is the offline preview: only SmartestChild works here. Use your Netlify site."); setBusy(""); send("D", ""); return; }
-    line(null, `Device: ${MOBILE ? "phone/tablet" : "computer"}, about ${navigator.deviceMemory || "?"} GB of memory reported`);
-    const adapter = await gpuAdapter();
-    line(adapter ? true : null, adapter ? `WebGPU graphics: yes${adapter.features.has("shader-f16") ? ", half precision" : ""}` : "WebGPU: not available, so WebLLM is hidden; Transformers.js runs on the CPU");
-    try {
-      const e = await navigator.storage.estimate();
-      const free = (e.quota - (e.usage || 0)) / 1e6;
-      line(free > 600, `Browser storage: ${mbText(free)} free of ${mbText(e.quota / 1e6)}${free > 600 ? "" : " - too little for most models; free space or clear this site's data"}`);
-    } catch (err) { line(null, "Browser storage: the browser won't say how much is free"); }
-    try {
-      const r = await timed(() => fetch("https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/config.json", { cache: "no-store" }), 15000);
-      line(r.ok, r.ok ? "Hugging Face (where models download from): reachable" : `Hugging Face answered ${r.status}`);
-    } catch (err) { line(false, "Hugging Face unreachable: " + explain(err).slice(0, 90) + " (a blocker, VPN or network filter?)"); }
-    try {
-      if (!tfjs) tfjs = await timed(() => import(TFJS_URL), 30000);
-      line(!!tfjs.pipeline, "Transformers.js library (jsDelivr): loaded" + (tfjs.env && tfjs.env.version ? " v" + tfjs.env.version : ""));
-    } catch (err) { line(false, "Transformers.js didn't load: " + String(err.message || err).slice(0, 90)); }
-    if (adapter) {
-      progress(70, "WebLLM");
-      try {
-        if (!webllm) webllm = await timed(() => import(WEBLLM_URL), 30000);
-        line(!!webllm.MLCEngine, "WebLLM library (esm.run): loaded");
-      } catch (err) { line(false, "WebLLM didn't load: " + String(err.message || err).slice(0, 90)); }
-    }
-    try { const t = await ollamaTags(1500); line(true, `Ollama on this PC: ${t.length} model(s)`); }
-    catch (_) { line(null, "Ollama: not running on this device (optional; computers only)"); }
-    haikuReady = null;
-    const route = await haikuRoute();
-    if (!route) line(null, "Haiku advancement: no Claude API key yet (optional)");
-    else {
-      try {
-        const t = await timed(() => callHaiku("Reply with the single word: ready", [{ role: "user", content: "Are you there?" }]), 30000);
-        line(true, `Haiku advancement (${route === "site" ? "Netlify key" : "key on this page"}): Claude answered "${t.trim().slice(0, 20)}"`);
-      } catch (err) {
-        line(false, `Haiku advancement (${route === "site" ? "Netlify key" : "key on this page"}): ${String(err.message).slice(0, 90)}`);
-      }
-    }
-    sendText("M", "If a line says FAIL, that is what stops models loading here.");
-    setBusy("");
+  async function runPs2(letter) {
+    if (!state.ps2) throw new Error("Type install ps2 first.");
+    const games = await ps2List();
+    const g = games.find((x) => x.letter.toLowerCase() === String(letter).trim().toLowerCase());
+    if (!g) throw new Error(`No PS2 game with letter ${letter}. Type run game to see the list.`);
+    if (onWindow) onWindow("ps2", g);
+    sendText("M", `Opened ${g.name} in ConMon Lab: tap Play in its window. It runs in a new tab.`);
     send("D", "");
-  }
-
-  // ------------------------------------------------- files from an answer
-  //
-  // Code blocks in an answer become files: saved into ConMon's RAM disk
-  // (so ls and cat show them) and shown in the page's preview window.
-
-  const EXT = { html: "html", htm: "html", css: "css", javascript: "js", js: "js", typescript: "ts", ts: "ts", python: "py", py: "py",
-    c: "c", cpp: "cpp", "c++": "cpp", java: "java", rust: "rs", go: "go", sh: "sh", bash: "sh", json: "json", sql: "sql", svg: "svg",
-    markdown: "md", md: "md", xml: "xml", yaml: "yml", php: "php", ruby: "rb", lua: "lua", txt: "txt", text: "txt" };
-  const DEFAULT_NAME = { html: "index.html", css: "style.css", js: "script.js", py: "main.py", c: "main.c", cpp: "main.cpp", java: "Main.java",
-    rs: "main.rs", go: "main.go", sh: "run.sh", json: "data.json", svg: "image.svg" };
-
-  function extractFiles(text) {
-    const files = [], used = new Set();
-    const re = /```([^\n`]*)\n([\s\S]*?)```/g;
-    let m;
-    while ((m = re.exec(String(text || "")))) {
-      const info = m[1].trim().split(/\s+/).filter(Boolean);
-      let lang = (info[0] || "").toLowerCase(), name = info.find((w) => /\.[a-z0-9]+$/i.test(w)) || "";
-      if (/\.[a-z0-9]+$/i.test(lang) && !name) { name = lang; lang = lang.split(".").pop(); }
-      let body = m[2];
-      const first = body.split("\n")[0];
-      const fromComment = /^\s*(?:\/\/|#|<!--|\/\*)\s*(?:file(?:name)?:?\s*)?([\w.-]+\.[a-z0-9]+)\s*(?:-->|\*\/)?\s*$/i.exec(first);
-      if (!name && fromComment) name = fromComment[1];
-      const ext = EXT[lang] || (name.split(".").pop() || "txt").toLowerCase();
-      if (!name) name = DEFAULT_NAME[ext] || "file." + ext;
-      name = name.replace(/[^\w.-]/g, "_").slice(-40);
-      while (used.has(name)) name = name.replace(/(\.[^.]+)?$/, "2$1");
-      used.add(name);
-      files.push({ name, ext: name.split(".").pop().toLowerCase(), content: body.replace(/\s+$/, "") + "\n" });
-    }
-    return files;
-  }
-
-  function deliverFiles(text) {
-    const files = extractFiles(text);
-    if (!files.length) return;
-    for (const f of files) {
-      const data = String(f.content).replace(/\r/g, "").replace(/[^\n\t\x20-\x7E]/g, "?");
-      for (let i = 0; i < data.length || i === 0; i += 7000) send(i === 0 ? "W" : "Y", f.name + "\n" + data.slice(i, i + 7000));
-    }
-    const list = files.map((f) => `${f.name} (${f.content.length < 1024 ? f.content.length + " B" : (f.content.length / 1024).toFixed(1) + " KB"})`).join(", ");
-    const canShow = !!onPreview;
-    sendText("M", `Saved ${list} in ConMon's RAM disk${canShow ? "; the preview window shows it" : ""}. After exit: ls, cat ${files[0].name}`);
-    if (onPreview) try { onPreview(files); } catch (err) { console.error(err); }
-  }
-
-  // ---------------------------------------------------------- mp finder
-  //
-  // `mp finder` in ConMon: an overview of every model, or one model's card.
-  // Curated facts are merged with live data from Hugging Face (downloads,
-  // likes, licence, last update) or from Ollama's /api/show on the user's PC.
-
-  const CATALOG = [
-    { re: /^smartest:/, maker: "ConMon Lab", params: "rules", context: "remembers your name",
-      good: "jokes, quick math, the time and ConMon facts",
-      about: "A retro rule-based chatbot. No neural network: it matches patterns, like the messenger bots of the early 2000s." },
-    { re: /LFM2/i, maker: "Liquid AI", good: "fast, short answers on small devices",
-      about: "A compact model family designed to run well on phones and laptops." },
-    { re: /SmolLM2/i, maker: "Hugging Face", context: "8K tokens", license: "apache-2.0",
-      good: "small talk, simple questions, rewriting text",
-      about: "A family of small open models trained by Hugging Face to run on-device." },
-    { re: /Qwen3/i, maker: "Alibaba (Qwen team)", context: "32K tokens", license: "apache-2.0",
-      good: "step-by-step reasoning, many languages, some coding",
-      about: "Can 'think' before answering; ConMon switches that off so replies come faster." },
-    { re: /Qwen2\.5/i, maker: "Alibaba (Qwen team)", context: "32K tokens", license: "apache-2.0",
-      good: "general questions, many languages, a little coding",
-      about: "A widely used open model family that is strong for its size." },
-    { re: /gemma/i, maker: "Google", context: "32K tokens", license: "Gemma terms of use",
-      good: "general chat and summaries",
-      about: "Google's open-weights family, built from the same research as Gemini." },
-    { re: /llama-?3\.2/i, maker: "Meta", context: "128K tokens", license: "Llama 3.2 Community License",
-      good: "general chat, summaries, following instructions",
-      about: "Meta's small Llama models, tuned to follow instructions." },
-    { re: /TinyLlama/i, maker: "TinyLlama project", context: "2K tokens", license: "apache-2.0",
-      good: "quick experiments; answers can be shaky",
-      about: "A 1.1B model trained on a huge amount of text for its size." },
-    { re: /mistral|mixtral|ministral/i, maker: "Mistral AI", about: "Open-weights models from the French lab Mistral AI." },
-    { re: /deepseek/i, maker: "DeepSeek", about: "Open-weights models from the Chinese lab DeepSeek." },
-    { re: /gpt-oss/i, maker: "OpenAI", about: "OpenAI's open-weights models." },
-    { re: /granite/i, maker: "IBM", about: "IBM's open Granite model family." },
-    { re: /olmo/i, maker: "Allen Institute for AI (Ai2)", about: "Fully open models: weights, data and training code." },
-    { re: /\bphi[-_]?\d/i, maker: "Microsoft", about: "Microsoft's small Phi model family." },
-    { re: /Phi-3\.5/i, maker: "Microsoft", context: "128K tokens", license: "mit",
-      good: "reasoning, math and code for its size",
-      about: "Microsoft's small model trained mostly on carefully filtered and synthetic data." },
-  ];
-
-  const ENGINE_NAME = { smartest: "built in", tfjs: "Transformers.js", webllm: "WebLLM", ollama: "Ollama" };
-
-  function catalogFor(m) {
-    const key = m.id + " " + m.label;
-    return CATALOG.find((c) => c.re.test(key)) || {};
-  }
-
-  function paramsOf(m) {
-    const c = catalogFor(m);
-    if (c.params) return c.params;
-    const x = /(\d+(?:\.\d+)?)\s*([BM])\b/i.exec(m.label) || /(\d+(?:\.\d+)?)([BM])/i.exec(m.id);
-    if (!x) return "?";
-    const v = parseFloat(x[1]);
-    return x[2].toUpperCase() === "M" ? (v / 1000).toFixed(2).replace(/0$/, "") + "B" : v + "B";
-  }
-
-  function fit(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "." : s.padEnd(n); }
-
-  function wrapText(text, width) {
-    const out = [];
-    let line = "";
-    for (const w of String(text).split(/\s+/)) {
-      if (line && (line + " " + w).length > width) { out.push(line); line = w; }
-      else line = line ? line + " " + w : w;
-    }
-    if (line) out.push(line);
-    return out;
-  }
-
-  async function hfInfo(repo) {
-    const res = await fetch("https://huggingface.co/api/models/" + repo, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const j = await res.json();
-    const lic = (j.tags || []).find((t) => t.startsWith("license:"));
-    return {
-      license: lic ? lic.slice(8) : (j.cardData && j.cardData.license) || "",
-      downloads: j.downloads, likes: j.likes,
-      updated: (j.lastModified || "").slice(0, 10),
-    };
-  }
-
-  async function ollamaShow(name) {
-    const res = await fetch(OLLAMA_URL + "/api/show", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: name }), signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
   }
 
   // Facts the ConMon XNU iPhone app read from the phone's own kernel.
@@ -1010,93 +248,6 @@
       lines.forEach((l, i) => sendText("M", (i ? " ".repeat(w + 4) : "  ") + l.trimStart()));
     }
     if (data.received) sendText("M", "  (received " + data.received.slice(0, 16).replace("T", " ") + " UTC)");
-    send("D", "");
-  }
-
-  async function modelInfo(target) {
-    if (!lastModels.length) await gatherModels();
-    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lines = [];
-
-    if (!target) {
-      setBusy("finding model info");
-      lines.push("  #  Model                        Maker                Size    Engine");
-      lastModels.forEach((m, i) => {
-        const { name } = engineOf(m.id);
-        lines.push(`  ${letters[i]}  ${fit(m.label, 28)} ${fit(catalogFor(m).maker || (name === "ollama" ? "(see details)" : "?"), 20)} ${fit(paramsOf(m), 7)} ${ENGINE_NAME[name] || name}`);
-      });
-      lines.push("");
-      lines.push("Type mp finder <letter> for one model's details, with live stats.");
-      for (const l of lines) sendText("M", l);
-      setBusy("");
-      send("D", "");
-      return;
-    }
-
-    const idx = lastModels.findIndex((m) => m.id === target);
-    if (idx < 0) throw new Error("That model isn't in the list any more. Type models to refresh it.");
-    const m = lastModels[idx];
-    const { name, model } = engineOf(m.id);
-    const c = catalogFor(m);
-    setBusy("finding info on " + m.label);
-    const adapter = await gpuAdapter();
-
-    let live = null, liveNote = "", source = "", contextNote = "", runs = "", license = c.license || "";
-    let maker = c.maker || "", params = paramsOf(m);
-    if (name === "tfjs" || name === "webllm") {
-      const repo = name === "tfjs" ? model : "mlc-ai/" + model;
-      source = "huggingface.co/" + repo;
-      try { live = await hfInfo(repo); } catch (_) { liveNote = "(live stats unavailable: no connection to Hugging Face)"; }
-      if (live && live.license) license = live.license;
-      runs = name === "tfjs"
-        ? "in this browser tab, " + (adapter ? "on your GPU (WebGPU)" : "on the CPU (WebAssembly)")
-        : "in this browser tab, on your GPU (WebGPU)";
-      if (name === "webllm" && webllm) {
-        const rec = webllm.prebuiltAppConfig.model_list.find((x) => x.model_id === model);
-        const ctx = rec && rec.overrides && rec.overrides.context_window_size;
-        if (ctx) contextNote = `${Math.round(ctx / 1024)}K tokens in this WebLLM build`;
-      }
-    } else if (name === "ollama") {
-      runs = "on your PC, served by Ollama at localhost:11434";
-      try {
-        const s = await ollamaShow(model);
-        const d = s.details || {};
-        if (d.parameter_size) params = d.parameter_size;
-        if (!maker && d.family) maker = d.family + " family";
-        if (d.quantization_level) runs += ` (${d.quantization_level})`;
-        const mi = s.model_info || {};
-        const arch = mi["general.architecture"];
-        const ctx = arch && mi[arch + ".context_length"];
-        if (ctx) contextNote = `${Math.round(ctx / 1024)}K tokens`;
-        if (s.license) license = String(s.license).split("\n").find((l) => l.trim()) || license;
-        live = { fromOllama: true };
-      } catch (_) { liveNote = "(Ollama didn't answer, so these details are partial)"; }
-      source = "ollama.com/library/" + model.split(":")[0];
-    } else {
-      runs = "inside this page; nothing to download";
-    }
-
-    const status = m.status === "downloaded" ? "already downloaded" : m.status === "ready" ? "ready" : m.status === "on your PC" ? "installed on your PC" : "not downloaded yet";
-    const row = (k, v) => ` ${k.padEnd(12)} ${v}`;
-    const head = ` ${m.label}`;
-    const tag = `${letters[idx]} - ${ENGINE_NAME[name] || name} `;
-    lines.push(head + " ".repeat(Math.max(1, 79 - head.length - tag.length)) + tag);
-    lines.push(" " + "-".repeat(77));
-    if (maker) lines.push(row("Maker", maker));
-    lines.push(row("Size", `${params} parameters, ${m.size} (${status})`));
-    lines.push(row("Runs", runs));
-    if (contextNote || c.context) lines.push(row("Context", contextNote || c.context));
-    if (license) lines.push(row("Licence", fit(license, 64)));
-    if (live && !live.fromOllama) {
-      lines.push(row("Popularity", `${(live.downloads || 0).toLocaleString("en-US")} downloads last month, ${(live.likes || 0).toLocaleString("en-US")} likes  (live)`));
-      if (live.updated) lines.push(row("Updated", live.updated + "  (live)"));
-    }
-    if (c.good) lines.push(row("Good at", c.good));
-    if (c.about) wrapText(c.about, 64).forEach((l, i) => lines.push(row(i ? "" : "About", l)));
-    if (source) lines.push(row("Source", source));
-    if (liveNote) lines.push(" " + liveNote);
-    for (const l of lines) sendText("M", l);
-    setBusy("");
     send("D", "");
   }
 
@@ -1791,25 +942,16 @@
       mode = 0; frame = "";
       meteoRun++;
       stopGame(null);
-      state.meteo = false; state.llm = false;   // a fresh ConMon has nothing installed
-      state.doom = false; state.doomy = false;
-      state.model = null; state.modelLabel = "";
-      history = [];
+      state.meteo = false;                      // a fresh ConMon has nothing installed
+      state.doom = false; state.doomy = false; state.ps2 = false;
       onState(state);
     },
     detach() { meteoRun++; stopGame(null); emu = null; },
     startDoomInstance,
     loadDoomModule,
     onByte,
-    checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
     onWindow(fn) { onWindow = fn; },
-    onPreview(fn) { onPreview = fn; },
-    onReloadNeeded(fn) { onReloadNeeded = fn; },
-    haikuKeyChanged() { haikuReady = null; },
     get state() { return state; },
-    // test hooks: let automated tests swap in fake engines
-    _setWebLLM(mod) { webllm = mod; },
-    _setTransformers(mod) { tfjs = mod; },
   };
 })();

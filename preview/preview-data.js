@@ -2,8 +2,7 @@
 //
 // The hosted preview can't reach the internet, so this file stands in for the
 // online weather service with clearly labelled SAMPLE weather. Places come
-// from the built-in city list (meteo/cities.json). Only SmartestChild is
-// offered as an AI engine. The real site doesn't load this.
+// from the built-in city list (meteo/cities.json). The real site doesn't load this.
 (() => {
   "use strict";
 

@@ -5,8 +5,8 @@ A Netlify site with two apps:
 - **Kernel Lab** (`/kernel/`): boots **ConMon**, a tiny x86 OS written in C and
   C++, inside the [v86](https://github.com/copy/v86) emulator in your browser.
   You can also load your own Multiboot kernel, floppy image, ISO or disk image.
-  Inside ConMon, `install llm` adds an AI chat (SmartestChild, Transformers.js,
-  WebLLM or Ollama) plus `mp finder` for model facts, and `install solMeteo`
+  Inside ConMon, `install ps2` lists PS2 games and `run game A` plays one
+  (Quake II's PS2 port) in the Play! PS2 emulator, and `install solMeteo`
   adds live weather from Open-Meteo for any place (2,582 cities built in, for
   offline use and `cities Italy`-style browsing) with an animated ASCII world map.
   `install doom` plays the real DOOM (shareware Episode 1) on ConMon's text
@@ -35,8 +35,8 @@ site/                      static site Netlify publishes
   index.html               landing page
   kernel/                  Kernel Lab (index.html + kernel.js)
   youtube/                 YouTube Test (index.html + youtube.js)
-  kernel/hostlink.js       host side of ConMon's packages (llm, solMeteo, doom, doomy)
-  kernel/smartestchild.js  the built-in SmartestChild chatbot
+  kernel/hostlink.js       host side of ConMon's packages (ps2, solMeteo, doom, doomy)
+  ps2/                     PS2 page: Play! emulator (emu/) and games (games/)
   kernels/                 bundled images: conmon.bin, hello-floppy.img
   meteo/                   countries GeoJSON + cities.json for solMeteo (public domain)
   doom/                    doom.wasm (DOOM engine + shareware WAD, GPL-2.0)
@@ -57,7 +57,7 @@ netlify.toml
 ## Run it on your PC (from the zip)
 
 Don't open the HTML files straight from the folder: browsers block the
-emulator, the AI models and downloads on `file://` pages (the page now says
+emulator and downloads on `file://` pages (the page now says
 so instead of breaking). Use the launcher instead:
 
 - **Windows:** double-click `Start ConMon Lab (Windows).bat`. It starts a
@@ -65,22 +65,8 @@ so instead of breaking). Use the launcher instead:
   `http://localhost:8080/kernel/`. Keep its window open; close it to stop.
 - **Mac / Linux:** `sh start-mac-linux.sh` (needs python3).
 
-Everything except the YouTube app's server-side key works this way; on
-Ollama set `OLLAMA_ORIGINS=http://localhost:8080`.
-
-### If an AI model won't load
-
-- ConMon now gives up with a message instead of freezing when the page
-  stops answering, and Ctrl+C (or Esc) cancels a download that is stuck.
-- On phones, a second model (or a retry after a failed load) needs a fresh
-  page, because the browser never gives that memory back; the page shows a
-  Reload button that comes back with llm installed.
-- Only one model sits in memory at a time; `install llm all` downloads each
-  model and frees it before the next one.
-- "Not enough browser storage": each model is kept in the browser's cache.
-  Free disk space, or clear this site's data in the browser settings.
-- "The graphics card ran out of memory": reload the page and pick a smaller
-  model (the list already hides models too big for the device).
+Everything except the YouTube app's server-side key and the PS2 emulator
+(it needs the cross-origin isolation headers Netlify adds) works this way.
 
 ## Deploy on Netlify (from GitHub)
 
@@ -165,46 +151,25 @@ python doomy.py
 
 Arrows or WASD move, Q/E strafe, Space fires, Enter starts, Esc quits.
 
-## AI models (install llm)
+## PS2 games (install ps2)
 
-Every model is a real open model made by its own developer (Meta, Alibaba,
-Google, Hugging Face, Liquid AI, Microsoft...); ConMon only runs it and shows
-its words. Each model is told who really made it, and ConMon prints the maker
-when a model loads. SmartestChild is the one exception: a scripted retro bot
-(rules, no AI model), labelled as such.
+`install ps2` lists the games, each with a letter; `run game A` opens it. A
+PS2 can't run on ConMon's emulated 486, so ConMon Lab opens **Play!**, the
+open-source PS2 emulator by Jean-Philip Desjardins, compiled to WebAssembly
+(`site/ps2/emu/`, built by `.github/workflows/ps2-emulator.yml`), in a new
+tab next to it.
 
-- **Transformers.js** and **WebLLM** models download from Hugging Face the
-  first time, then stay cached in the browser. WebLLM needs WebGPU (Chrome or
-  Edge on a computer); on phones Transformers.js runs on the CPU.
-- **Ollama** runs models on your own PC.
+- **A: Quake II** — glampert's fan-made PS2 port of id Software's Quake II
+  ([glampert/quake2-for-ps2](https://github.com/glampert/quake2-for-ps2),
+  GPL-2.0), built with the free ps2dev SDK (`site/ps2/games/quake2.elf`).
+  It needs Quake II's game data, `baseq2/pak0.pak` (about 175 MB) from your
+  own copy of Quake II (Steam or GOG), which can't be included. Pick it once;
+  the page keeps it in this browser's private storage for next time.
 
-### If a model won't load: `models check`
-
-Type `models check` in ConMon. It tests this device line by line (WebGPU,
-free browser storage, Hugging Face, the Transformers.js and WebLLM
-libraries, Ollama and the Claude key) and marks what fails.
-
-### Haiku advancement
-
-After each answer, **Claude Haiku 5.5** (Anthropic, model `claude-haiku-5-5`)
-checks it, fixes mistakes and writes better code; its answer appears under
-`[Haiku advancement]`. Small local models get things wrong; this is what makes
-the answers dependable. It needs a Claude API key, in one of two ways:
-
-- **On Netlify (recommended):** set `ANTHROPIC_API_KEY` under Site
-  configuration → Environment variables. The key stays on the server; the
-  page calls `/api/claude` (`netlify/functions/claude.mjs`).
-- **In the browser:** paste a key in the Packages panel. It is kept only in
-  that browser and sent straight to api.anthropic.com.
-
-In a chat, `haiku off` / `haiku on` switches it. It is off in the offline preview.
-
-### Files and previews
-
-Code in an answer (```` ```html index.html ```` blocks) is saved as files in
-ConMon's RAM disk (`ls`, `cat index.html` after `exit`) and opened in a preview
-window on the page: web pages run live in a sandbox, other languages show as
-code with a Download button.
+PS2 emulation is heavy: a recent PC runs it best; phones are slow. Controls:
+arrows (D-pad), T F G H (left stick), I J K L (look), Z (X / fire), X
+(circle), A (square), S (triangle), Enter (Start), Backspace (Select), 1 2 / 8 9
+(L1 L2 / R1 R2).
 
 ## iPhone kernel info (apple) and Android (android)
 
@@ -244,7 +209,9 @@ code with a Download button.
   built into `site/doom/ndoom.cmx` with ConMon Lab's platform layer and libc.
 - Pyodide (MPL-2.0), loaded from the jsDelivr CDN when you `install doomy`.
   doomy itself is ConMon Lab's own code (MIT).
-- WebLLM by the MLC team, Apache-2.0, loaded from the esm.run CDN at runtime.
-- Transformers.js by Hugging Face, Apache-2.0, loaded from jsDelivr at runtime.
-- Haiku advancement: Claude Haiku 5.5 by Anthropic, through your own API key.
+- Play! PS2 emulator by Jean-Philip Desjardins and contributors, BSD-2-Clause
+  (`site/ps2/emu/LICENSE-Play.txt`), commit in `tools/ps2/PLAY_COMMIT`.
+- Quake II for the PS2 by Guilherme R. Lampert, on id Software's Quake II
+  source, GPL-2.0 (`site/ps2/games/`). Quake II is a trademark of id Software;
+  its game data is not included.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.

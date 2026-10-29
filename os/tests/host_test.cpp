@@ -164,7 +164,7 @@ static void test_shell() {
     // Without a host link, install explains instead of hanging.
     o = run_shell("install\ninstall solMeteo\ninstall mp4\nplay x\nmeteo Rome\n");
     CHECK(contains(o, "solMeteo   Live weather"));
-    CHECK(contains(o, "install llm all"));
+    CHECK(contains(o, "install ps2"));
     CHECK(contains(o, "No host link found."));
     CHECK(contains(o, "No package named mp4"));
     CHECK(contains(o, "unknown command: play"));

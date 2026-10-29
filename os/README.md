@@ -24,15 +24,15 @@ boot entry and interrupt stubs.
 | Shell | Line editor with history (↑/↓), Ctrl+C, Ctrl+L, quoted arguments, 22 commands | C++ |
 | RAM disk | Flat in-memory filesystem: `ls cat write append rm mv` | C++ |
 | Host link | Message protocol over COM1 (interrupt-driven receive) | C |
-| Packages | `install llm` adds `models`, `load` and `mp finder`; `install solMeteo` adds `meteo`; `install doom` / `install doomy` add the games | C++ |
+| Packages | `install ps2` adds `run game`; `install solMeteo` adds `meteo`; `install doom` / `install doomy` add the games | C++ |
 
 Shell commands: `help clear echo about uptime mem cpu color calc ls cat write
-append rm mv history sleep beep guess crash reboot halt install`, plus `models`,
-`load`, `mp`, `meteo`, `doom` and `doomy` once their packages are installed.
+append rm mv history sleep beep guess crash reboot halt install apple android`,
+plus `run`, `meteo`, `doom`, `doomy` and `native` once their packages are installed.
 
 ## Packages and the host link
 
-ConMon can't reach the internet or run a neural network by itself, so packages lean
+ConMon can't reach the internet or emulate a PS2 by itself, so packages lean
 on a *host*: ConMon Lab, the web page running the emulator. They talk over the
 serial port (`kernel/hostlink.c`):
 
@@ -41,13 +41,8 @@ ConMon -> host:  ESC ] "CM;" <type> ";" <payload> BEL
 host -> ConMon:  STX <type> <len lo> <len hi> <payload>
 ```
 
-- `install llm`: the host lists models from four engines, each with a letter:
-  SmartestChild (a built-in retro chatbot), Transformers.js and WebLLM (in the
-  browser tab) and Ollama (on your PC at localhost:11434). Type a letter to
-  download or prepare it, then `load` to chat. `install llm all` downloads
-  every browser model in one go (after asking). `mp finder` lists every model
-  with its maker and size; `mp finder E` shows one model's details, with live
-  licence, downloads and likes from Hugging Face (or Ollama's own info).
+- `install ps2`: the host lists the PS2 games, each with a letter;
+  `run game A` asks the page to open that game in the Play! PS2 emulator.
 - `install solMeteo`: adds `meteo`. Type a place: ConMon clears the screen and
   the host draws full-screen frames: an ASCII world map built from GeoJSON
   country outlines flies to the place, then the current weather and a 3-day

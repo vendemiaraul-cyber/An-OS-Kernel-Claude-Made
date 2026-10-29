@@ -17,7 +17,7 @@ OUT = os.path.join(ROOT, "preview", "out")
 FILES = {
     "v86/libv86.js": "v86/libv86.js", "v86/v86.wasm": "v86/v86.wasm",
     "meteo/countries.geo.json": "meteo/countries.geo.json", "meteo/cities.json": "meteo/cities.json",
-    "kernel/smartestchild.js": "kernel/smartestchild.js", "kernel/hostlink.js": "kernel/hostlink.js",
+    "kernel/hostlink.js": "kernel/hostlink.js",
     "doom/doom.wasm": "doom/doom.wasm", "doom/LICENSE-GPL-2.0.txt": "doom/LICENSE-GPL-2.0.txt", "doom/SOURCE.txt": "doom/SOURCE.txt",
 }
 for _f in os.listdir(os.path.join(SITE, "guests")):
@@ -99,14 +99,13 @@ def main():
     body = re.sub(r'<nav class="nav">.*?</nav>', '<span class="badge" style="margin-left:auto"><span class="led"></span>preview</span>', body, flags=re.S)
     body = body.replace('<a class="brand" href="/">', '<span class="brand">').replace('ConMon<span class="full">&nbsp;Lab</span></a>', 'ConMon<span class="full">&nbsp;Lab</span></span>')
     body = re.sub(r'<footer class="wrap footer">.*?</footer>', '<footer class="wrap footer">ConMon Lab preview. The full site, with the YouTube Test app, lives on your Netlify deploy.</footer>', body, flags=re.S)
-    note = ('<div class="preview-note"><b>Preview mode.</b> This copy runs without internet, so the AI chat offers '
-            'SmartestChild only, and solMeteo shows <b>sample</b> weather for 2,582 built-in cities (try Rome, Bologna, Tokyo, or cities Italy). '
+    note = ('<div class="preview-note"><b>Preview mode.</b> This copy runs without internet, so the PS2 games can\'t start here, and solMeteo shows <b>sample</b> weather for 2,582 built-in cities (try Rome, Bologna, Tokyo, or cities Italy). '
             'Everything else is the real thing: boot the <b>Linux Desktop</b>, Linux 6.6, MikeOS, Tetros and more from the list, <b>install doom</b> plays real DOOM on ConMon\'s screen, <b>install native doom</b> has ConMon run DOOM itself, '
             'and MikeOS\'s DOOM.BAS opens DOOM in a window. '
-            'On your Netlify site, doomy (Python via Pyodide), Transformers.js, WebLLM, Ollama, live Open-Meteo weather and mp finder\'s live stats also work.</div>')
+            'On your Netlify site, doomy (Python via Pyodide), the PS2 games and live Open-Meteo weather also work.</div>')
     body = body.replace("</p>\n    </section>", "</p>\n      " + note + "\n    </section>", 1)
     scripts = ('<script src="preview-data.js"></script>\n  <script src="images.js"></script>\n  <script src="v86/libv86.js"></script>\n'
-               '  <script src="kernel/smartestchild.js"></script>\n  <script src="kernel/hostlink.js"></script>\n'
+               '  <script src="kernel/hostlink.js"></script>\n'
                '  <script src="kernel/kernel.js"></script>')
     body = re.sub(r'<script src="/v86/libv86.js"></script>.*<script src="/kernel/kernel.js"></script>', scripts, body, flags=re.S)
     assert 'src="/' not in body and 'href="/' not in body, "absolute path left in preview page"

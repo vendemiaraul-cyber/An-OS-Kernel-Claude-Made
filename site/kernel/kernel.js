@@ -12,8 +12,8 @@
     file: $("file"), drop: $("drop"), fileInfo: $("file-info"), url: $("url"),
     kind: $("kind"), ram: $("ram"),
     typebar: $("typebar"), typeInput: $("type-input"), chips: $("chips"),
-    pkgPanel: $("pkg-panel"), pkgMeteo: $("pkg-meteo"), pkgLlm: $("pkg-llm"), pkgGpu: $("pkg-gpu"),
-    pkgModel: $("pkg-model"), pkgBusy: $("pkg-busy"),
+    pkgPanel: $("pkg-panel"), pkgMeteo: $("pkg-meteo"),
+    pkgBusy: $("pkg-busy"),
     serial: $("serial"), serialClear: $("btn-serial-clear"),
     gamePad: $("game-pad"), keys: $("keys"), zoom: $("btn-zoom"), monitor: $("monitor"), taskbar: $("taskbar"), hint: $("screen-hint"),
   };
@@ -265,11 +265,7 @@
   host.onStateChange((st) => {
     ui.pkgMeteo.textContent = st.meteo ? "installed" : "not installed";
     ui.pkgMeteo.className = "pill" + (st.meteo ? " on" : "");
-    ui.pkgLlm.textContent = st.llm ? "installed" : "not installed";
-    ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
-    ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
-    ui.pkgModel.textContent = st.model ? "model: " + (st.modelLabel || st.model.replace(/-MLC$/, "")) : "no model loaded";
-    for (const name of ["doom", "doomy", "nativedoom"]) {
+    for (const name of ["doom", "doomy", "nativedoom", "ps2"]) {
       const el = document.getElementById("pkg-" + name);
       if (el) { el.textContent = st[name] ? "installed" : "not installed"; el.className = "pill" + (st[name] ? " on" : ""); }
     }
@@ -280,7 +276,6 @@
     ui.gamePad.hidden = !st.game;
     ui.keys.hidden = !!st.game;
   });
-  host.checkGpu();
 
   // Game pad: hold-able buttons that send real press/release scancodes to
   // the emulated keyboard, so ConMon (in raw mode) forwards them to the game.
@@ -378,122 +373,29 @@
     if (emulator) ui.fit.focus({ preventScroll: true });
   }
 
-  host.onWindow((what) => { if (what === "doom") openDoomWindow(); else if (what === "android") openAndroid(); });
-
-  // Phones: a second AI model needs a fresh page. Offer a reload that comes
-  // back with llm already installed.
-  host.onReloadNeeded(() => {
-    if ($("reload-bar")) return;
-    const bar = document.createElement("button");
-    bar.id = "reload-bar";
-    bar.className = "taskbar";
-    bar.textContent = "Tap to reload the page and load another AI model";
-    bar.addEventListener("click", () => {
-      try { sessionStorage.setItem("conmon.resume", "llm"); } catch (_) {}
-      location.reload();
-    });
-    ui.monitor.prepend(bar);
+  host.onWindow((what, arg) => {
+    if (what === "doom") openDoomWindow();
+    else if (what === "android") openAndroid();
+    else if (what === "ps2") openPs2(arg);
   });
 
-  // ------------------------------------------------------ AI file preview
-  const pv = { win: $("preview-window"), name: $("preview-name"), tabs: $("preview-tabs"), frame: $("preview-frame"),
-    code: $("preview-code"), mode: $("preview-mode"), download: $("preview-download"), close: $("preview-close") };
-  let pvFiles = [], pvCurrent = 0, pvShowCode = false, pvUrl = "";
-
-  function pageFor(files) {
-    const html = files.find((f) => f.ext === "html" || f.ext === "htm");
-    const esc = (t) => t.replace(/<\/(script|style)/gi, "<\\/$1");
-    if (html) {
-      let page = html.content;
-      for (const f of files) {
-        if (f.ext === "css") {
-          const re = new RegExp(`<link[^>]*href=["']?${f.name.replace(/\./g, "\\.")}["']?[^>]*>`, "i");
-          const tag = `<style>${f.content}</style>`;
-          page = re.test(page) ? page.replace(re, () => tag) : /<\/head>/i.test(page) ? page.replace(/<\/head>/i, () => tag + "</head>") : tag + page;
-        } else if (f.ext === "js") {
-          const re = new RegExp(`<script[^>]*src=["']?${f.name.replace(/\./g, "\\.")}["']?[^>]*>\\s*</script>`, "i");
-          const tag = `<script>${esc(f.content)}</script>`;
-          page = re.test(page) ? page.replace(re, () => tag) : /<\/body>/i.test(page) ? page.replace(/<\/body>/i, () => tag + "</body>") : page + tag;
-        }
-      }
-      return page;
-    }
-    const css = files.filter((f) => f.ext === "css").map((f) => f.content).join("\n");
-    const js = files.filter((f) => f.ext === "js").map((f) => f.content).join("\n");
-    const svg = files.find((f) => f.ext === "svg");
-    if (svg) return `<!doctype html><body style="margin:0;display:grid;place-items:center;min-height:100vh">${svg.content}</body>`;
-    if (!js && !css) return null;
-    return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:15px system-ui,sans-serif;margin:16px}#log{white-space:pre-wrap;font:13px monospace;background:#f4f4f4;padding:8px}${css}</style></head>` +
-      `<body><div id="log"></div><script>(function(){var l=document.getElementById('log');var o=console.log;console.log=function(){l.textContent+=Array.prototype.join.call(arguments,' ')+'\\n';o.apply(console,arguments)};window.onerror=function(m){l.textContent+='Error: '+m+'\\n'}})();<\/script><script>${esc(js)}<\/script></body></html>`;
+  // PS2 games run on /ps2/ (cross-origin isolated, so not in this page).
+  // A tap opens it: browsers only allow a new tab from a tap.
+  const ps2 = { win: $("ps2-window"), name: $("ps2-name"), about: $("ps2-about"), needs: $("ps2-needs"), play: $("ps2-play"), game: null };
+  function openPs2(g) {
+    ps2.game = g;
+    ps2.name.textContent = "PS2 · " + g.name;
+    ps2.about.textContent = g.name + ": " + g.by + " (" + g.licence + ").";
+    ps2.needs.textContent = g.needs ? "Needs " + g.needs.what + ". You pick it once on the game's page; it stays in this browser." : "";
+    ps2.win.hidden = false;
   }
-
-  function showPreviewFile() {
-    const f = pvFiles[pvCurrent];
-    if (!f) return;
-    const page = pageFor(pvFiles);
-    const runnable = !!page;
-    pvShowCode = pvShowCode || !runnable;
-    pv.name.textContent = runnable && !pvShowCode ? "Preview · " + (pvFiles.find((x) => x.ext === "html") || f).name : f.name;
-    pv.frame.hidden = pvShowCode;
-    pv.code.hidden = !pvShowCode;
-    pv.mode.textContent = pvShowCode ? "Preview" : "Code";
-    pv.mode.disabled = !runnable;
-    pv.code.textContent = f.content;
-    if (!pvShowCode && pv.frame.dataset.page !== page) { pv.frame.srcdoc = page; pv.frame.dataset.page = page; }
-    for (const [i, b] of [...pv.tabs.children].entries()) b.classList.toggle("on", i === pvCurrent);
-    if (pvUrl) URL.revokeObjectURL(pvUrl);
-    pvUrl = URL.createObjectURL(new Blob([f.content], { type: "text/plain" }));
-    pv.download.href = pvUrl;
-    pv.download.download = f.name;
-  }
-
-  host.onPreview((files) => {
-    pvFiles = files;
-    pvCurrent = Math.max(0, files.findIndex((f) => f.ext === "html"));
-    pvShowCode = false;
-    pv.tabs.innerHTML = "";
-    files.forEach((f, i) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = f.name;
-      b.addEventListener("click", () => { pvCurrent = i; showPreviewFile(); });
-      pv.tabs.append(b);
-    });
-    pv.tabs.hidden = files.length < 2;
-    pv.frame.dataset.page = "";
-    pv.win.hidden = false;
-    pv.win.classList.add("running");
-    showPreviewFile();
+  $("ps2-close").addEventListener("click", () => { ps2.win.hidden = true; ui.fit.focus({ preventScroll: true }); });
+  ps2.play.addEventListener("click", () => {
+    if (!ps2.game) return;
+    window.open("/ps2/?game=" + encodeURIComponent(ps2.game.id), "_blank");
+    ps2.win.hidden = true;
   });
-  pv.mode.addEventListener("click", () => { pvShowCode = !pvShowCode; showPreviewFile(); });
-  pv.close.addEventListener("click", () => { pv.win.hidden = true; pv.frame.srcdoc = ""; pv.frame.dataset.page = ""; ui.fit.focus({ preventScroll: true }); });
 
-  // Claude API key for the Haiku advancement, kept only in this browser.
-  const haikuPill = $("pkg-haiku"), haikuInput = $("haiku-key");
-  async function haikuStatus() {
-    if (!haikuPill) return;
-    let site = false;
-    if (!window.CONMON_PREVIEW) try { const r = await fetch("/api/claude"); site = r.ok && (await r.json()).ready; } catch (_) {}
-    let local = "";
-    try { local = localStorage.getItem("conmon.anthropicKey") || ""; } catch (_) {}
-    const on = site || local;
-    haikuPill.textContent = window.CONMON_PREVIEW ? "needs internet" : site ? "on (site key)" : local ? "on (key in this browser)" : "needs a key";
-    haikuPill.className = "pill" + (on && !window.CONMON_PREVIEW ? " on" : "");
-  }
-  $("haiku-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const k = haikuInput.value.trim();
-    if (k) try { localStorage.setItem("conmon.anthropicKey", k); } catch (_) {}
-    haikuInput.value = "";
-    host.haikuKeyChanged();
-    haikuStatus();
-  });
-  $("haiku-clear").addEventListener("click", () => {
-    try { localStorage.removeItem("conmon.anthropicKey"); } catch (_) {}
-    host.haikuKeyChanged();
-    haikuStatus();
-  });
-  haikuStatus();
   doomUi.close.addEventListener("click", closeDoomWindow);
   doomUi.screen.addEventListener("pointerdown", () => doomUi.screen.focus({ preventScroll: true }));
   for (const [type, down] of [["keydown", true], ["keyup", false]]) {
@@ -616,10 +518,6 @@
         setRunningControls(true);
         ui.fit.focus({ preventScroll: true });
         setTimeout(fitScreen, 50);
-        // Back from a "reload to load another model": reinstall llm for you.
-        let resume = "";
-        try { resume = sessionStorage.getItem("conmon.resume") || ""; sessionStorage.removeItem("conmon.resume"); } catch (_) {}
-        if (resume === "llm" && src.bundled === "conmon") setTimeout(() => { if (emulator === emu) sendText("install llm\n"); }, 3500);
       });
       emu.add_listener("emulator-stopped", () => {
         if (emulator === emu) { setStatus("paused", "warn"); ui.pause.textContent = "Resume"; }

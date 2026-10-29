@@ -6,3 +6,4 @@ os/conmon.iso
 .DS_Store
 preview/out/
 ext/build/
+__pycache__/

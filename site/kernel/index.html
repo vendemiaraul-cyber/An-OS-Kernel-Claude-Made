@@ -7,7 +7,7 @@
   if (location.protocol === "file:") document.addEventListener("DOMContentLoaded", function () {
     document.body.innerHTML = '<div style="max-width:640px;margin:60px auto;padding:24px;font:16px/1.5 system-ui,sans-serif;color:#e6edf3;background:#11161c;border:1px solid #2a3440;border-radius:12px">' +
       '<h1 style="margin-top:0;font-size:24px">Start ConMon Lab with its launcher</h1>' +
-      '<p>This page was opened straight from the folder. Browsers don\'t allow the PC emulator, AI models or downloads there, so it can\'t run like this.</p>' +
+      '<p>This page was opened straight from the folder. Browsers don\'t allow the PC emulator or downloads there, so it can\'t run like this.</p>' +
       '<p><b>On Windows:</b> in the unzipped folder, double-click <code>Start ConMon Lab (Windows).bat</code>. It opens ConMon Lab at <code>http://localhost:8080</code>; keep its window open while you play.</p>' +
       '<p><b>On a Mac or Linux:</b> run <code>sh start-mac-linux.sh</code> in the folder.</p>' +
       '<p>Or put the folder on Netlify, as in the README.</p></div>';
@@ -116,15 +116,7 @@
       .vm-type .field { font-size: 16px; }
       .vm-keys button { flex: 1 1 calc(20% - 6px); min-width: 0; min-height: 44px; }
     }
-    .doom-window .vm-title, .preview-window .vm-title { cursor: default; }
-    .preview-window { width: min(720px, calc(100% - 36px)); }
-    .preview-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 10px 0; }
-    .preview-tabs button { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 4px 9px; font: 12px var(--mono); cursor: pointer; }
-    .preview-tabs button.on { border-color: var(--accent); color: var(--accent); }
-    .preview-frame { width: 100%; height: min(60vh, 460px); border: 0; background: #fff; margin-top: 6px; }
-    .preview-code { margin: 6px 0 0; padding: 10px 12px; height: min(60vh, 460px); overflow: auto; background: #05070a; color: #d7e0ea; font: 13px/1.45 var(--mono); white-space: pre; }
-    .preview-frame[hidden], .preview-code[hidden], .preview-tabs[hidden] { display: none; }
-    @media (max-width: 720px) { .preview-frame, .preview-code { height: calc(100vh - 130px); } .preview-window { width: auto; } }
+    .doom-window .vm-title { cursor: default; }
     .doom-screen { cursor: default; }
     .doom-screen canvas { width: 100%; height: auto; aspect-ratio: 8 / 5; image-rendering: auto; }
     .doom-pad { padding: 0 12px 12px; }
@@ -132,8 +124,6 @@
     .byo-window { width: min(560px, calc(100% - 36px)); }
     .byo-body { padding: 10px 14px 14px; font-size: 14px; line-height: 1.5; }
     .byo-body ol { padding-left: 20px; margin: 8px 0 12px; }
-    .haiku-key { display: flex; gap: 6px; }
-    .haiku-key .field { flex: 1; min-width: 0; font-family: var(--mono); }
     .screen-hint { margin: 8px 0 0; font-size: 13px; color: #a7f3c0; }
     .game-pad { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-top: 10px; user-select: none; -webkit-user-select: none; touch-action: none; }
     .game-pad[hidden], .keys[hidden] { display: none; }
@@ -250,6 +240,20 @@
               <p class="small muted">It runs with 256 MB of RAM and takes a few minutes to start. On a phone it is slow; a computer works best.</p>
             </div>
           </div>
+          <!-- PS2 games: Play! runs them on /ps2/ -->
+          <div class="vm-window byo-window" id="ps2-window" hidden role="dialog" aria-label="PS2 game">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name" id="ps2-name">PS2 game</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="ps2-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p id="ps2-about"></p>
+              <p class="small muted" id="ps2-needs"></p>
+              <p class="small muted">It runs in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, on a page of its own (a new tab). A recent computer runs it best; phones are slow.</p>
+              <button class="btn primary" id="ps2-play" type="button">Play</button>
+            </div>
+          </div>
           <!-- Android: real Android on the person's own server, streamed -->
           <div class="vm-window byo-window" id="android-window" hidden role="dialog" aria-label="Android on your server">
             <div class="vm-title">
@@ -268,15 +272,7 @@
               <p class="small muted" id="android-status"></p>
             </div>
           </div>
-          <!-- Files an AI wrote, shown live -->
-          <div class="vm-window preview-window" id="preview-window" hidden role="dialog" aria-label="File preview">
-            <div class="vm-title">
-              <span class="vm-led"></span><span class="vm-name" id="preview-name">Preview</span>
-              <span class="vm-spacer"></span>
-              <button class="vm-btn" id="preview-mode">Code</button>
-              <a class="vm-btn" id="preview-download" download>Download</a>
-              <button class="vm-btn vm-close" id="preview-close" aria-label="Close the preview">✕</button>
-            </div>
+          </div>
             <div class="preview-tabs" id="preview-tabs"></div>
             <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" title="Preview of the AI's file"></iframe>
             <pre class="preview-code" id="preview-code" hidden></pre>
@@ -327,10 +323,8 @@
             <button class="chip pkg" data-cmd="native doom">native doom</button>
             <button class="chip pkg" data-cmd="install doomy">install doomy</button>
             <button class="chip pkg" data-cmd="doomy">doomy</button>
-            <button class="chip pkg" data-cmd="install llm">install llm</button>
-            <button class="chip pkg" data-cmd="install llm all">install llm all</button>
-            <button class="chip pkg" data-cmd="load">load</button>
-            <button class="chip pkg" data-cmd="mp finder">mp finder</button>
+            <button class="chip pkg" data-cmd="install ps2">install ps2</button>
+            <button class="chip pkg" data-cmd="run game A">run game A</button>
             <button class="chip pkg" data-cmd="install solMeteo">install solMeteo</button>
             <button class="chip pkg" data-cmd="Rome">Rome</button>
             <button class="chip pkg" data-cmd="Bologna">Bologna</button>
@@ -392,24 +386,9 @@
 
         <div class="panel" id="pkg-panel">
           <h2>Packages</h2>
-          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs AI models and games, fetches weather, then streams the results back into the OS.</p>
-          <div class="pkg-row"><span class="mono">llm</span><span class="pill" id="pkg-llm">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install llm</span>, pick a model by its letter, then <span class="mono">load</span> to chat. Four engines:</div>
-          <ul class="tips small" style="margin:0">
-            <li><b>SmartestChild</b>: built-in retro chatbot, instant on any device.</li>
-            <li><b>Transformers.js</b>: small models (~0.3-0.6 GB) in this tab, on the GPU or CPU.</li>
-            <li><b>WebLLM</b>: bigger models (0.4-3.5 GB) on your GPU, needs WebGPU.</li>
-            <li><b>Ollama</b>: models on your own PC. Set <span class="mono">OLLAMA_ORIGINS</span> to this site's address so the page may reach it.</li>
-          </ul>
-          <div class="muted small"><span class="mono">install llm all</span> downloads every model at once. <span class="mono">mp finder</span> shows facts about each model, with live stats from Hugging Face or Ollama.</div>
-          <div class="file-info"><span id="pkg-gpu">WebGPU: checking…</span> · <span id="pkg-model">no model loaded</span></div>
-          <div class="pkg-row"><span class="mono">Haiku advancement</span><span class="pill" id="pkg-haiku">checking…</span></div>
-          <div class="muted small">After each answer, Claude Haiku 5.5 (by Anthropic) checks it, fixes mistakes and writes better code. Code in answers is saved as files in ConMon and shown in a preview window. It needs a Claude API key: set <span class="mono">ANTHROPIC_API_KEY</span> on Netlify, or paste one here (kept only in this browser). In a chat, <span class="mono">haiku off</span> turns it off.</div>
-          <form class="haiku-key" id="haiku-form" autocomplete="off">
-            <input class="field" id="haiku-key" type="password" placeholder="sk-ant-… (optional)" aria-label="Claude API key">
-            <button class="btn" type="submit">Save</button>
-            <button class="btn" type="button" id="haiku-clear">Clear</button>
-          </form>
+          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs games, fetches weather, then streams the results back into the OS.</p>
+          <div class="pkg-row"><span class="mono">ps2</span><span class="pill" id="pkg-ps2">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install ps2</span> for the PS2 games, each with a letter, then <span class="mono">run game A</span>. They run in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, in a new tab. A: Quake II (glampert's PS2 port; bring <span class="mono">pak0.pak</span> from your own Quake II).</div>
           <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
           <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>. Type <span class="mono">cities Italy</span> to browse the 2,582 built-in cities.</div>
           <div class="pkg-row"><span class="mono">doom</span><span class="pill" id="pkg-doom">not installed</span></div>
@@ -480,7 +459,6 @@
   <footer class="wrap footer">ConMon Lab · <a href="/">home</a></footer>
 
   <script src="/v86/libv86.js"></script>
-  <script src="/kernel/smartestchild.js"></script>
   <script src="/kernel/hostlink.js"></script>
   <script src="/kernel/kernel.js"></script>
 </body>

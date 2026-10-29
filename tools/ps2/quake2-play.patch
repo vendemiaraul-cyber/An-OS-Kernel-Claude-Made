@@ -1,0 +1,26 @@
+diff --git a/src/ps2/system/iop_boot.cpp b/src/ps2/system/iop_boot.cpp
+index 4b30462..3e3fbb5 100644
+--- a/src/ps2/system/iop_boot.cpp
++++ b/src/ps2/system/iop_boot.cpp
+@@ -780,10 +780,21 @@ bool PatchModuleLoader()
+     SifInitRpc(0);
+ 
+     const int lmbPatch = sbv_patch_enable_lmb();
++#if defined(PS2_QUAKE_PLAY_EMU) && PS2_QUAKE_PLAY_EMU
++    // [ConMon Lab]: the Play! emulator's high-level IOP answers SifExecModuleBuffer itself
++    // (LOADFILE RPC 0x06), but has no ROM image for sbv to patch, so the patches fail there.
++    if (lmbPatch < 0 || sbv_patch_disable_prefix_check() != 0)
++    {
++        s_verifyNextLoad    = false;
++        s_moduleLoaderReady = true;
++        return true;
++    }
++#else
+     if (lmbPatch < 0 || sbv_patch_disable_prefix_check() != 0)
+     {
+         return false;
+     }
++#endif
+ 
+     s_verifyNextLoad    = (lmbPatch != 0);
+     s_moduleLoaderReady = true;

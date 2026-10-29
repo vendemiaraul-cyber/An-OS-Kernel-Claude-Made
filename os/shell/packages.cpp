@@ -1,14 +1,13 @@
 // ConMon - packages.cpp : the package manager and the commands it adds.
 //
 //   install                  list packages
-//   install llm              chat with an AI model     -> adds `models`, `load`, `mp`
-//   install llm all          ...and download every model right away
+//   install ps2              PS2 games (Play! emulator) -> lists them, adds `run game`
 //   install solMeteo         live weather + ASCII map  -> adds `meteo`
 //   install doom             DOOM on the text screen   -> adds `doom`
 //   install doomy            a DOOM-style game in Python (Pyodide) -> adds `doomy`
 //   install native doom      DOOM run by ConMon itself, 320x200 -> adds `native doom`
 //
-// ConMon can't run a neural network or reach the internet itself, so
+// ConMon can't emulate a PS2 or reach the internet itself, so
 // packages work through the host link (kernel/hostlink.c): ConMon Lab, the
 // browser page around the emulator, does the heavy lifting and streams
 // results back over the serial port. On QEMU or a real PC there is no host,
@@ -19,16 +18,7 @@
 namespace {
 
 bool host_ok;
-bool llm_installed, meteo_installed, doom_installed, doomy_installed, ndoom_installed;
-
-struct Model {
-    char   letter;
-    String id, size, label;
-    String status;                      // "downloaded", "ready", "on your PC" or empty
-    String engine;                      // section heading, e.g. "Ollama - on your PC"
-};
-Vector<Model> models;
-String ready_id, ready_label;           // model downloaded and loaded this session
+bool ps2_installed, meteo_installed, doom_installed, doomy_installed, ndoom_installed;
 
 // ------------------------------------------------------------- utilities
 
@@ -121,7 +111,7 @@ const uint32_t HOST_SILENCE_MS = 30000;
 
 void host_gone(bool showed_bar) {
     if (showed_bar) kputc('\n');
-    error("ConMon Lab stopped answering. If the page froze, reload it; a smaller model may help.");
+    error("ConMon Lab stopped answering. If the page froze, reload it.");
     hostlink_reset();
 }
 
@@ -174,54 +164,8 @@ bool host_job(Shell &sh, const char *type, const char *payload, String *done = n
     return host_job_ex(sh, type, payload, done) == JOB_OK;
 }
 
-// Asks the host something and prints its one-line answer ('M').
-void show_host_message(Shell &, const char *type, const char *payload) {
-    hostlink_send(type, payload);
-    hl_packet p;
-    uint32_t start = now_ms();
-    while (now_ms() - start < 6000) {
-        if (!wait_packet(p, 6000)) break;
-        if (p.type == 'M' || p.type == 'E') {
-            Color c(p.type == 'M' ? VGA_LIGHT_GREEN : VGA_YELLOW);
-            kprintf("%s\n", reinterpret_cast<const char *>(p.data));
-            return;
-        }
-    }
-}
+// ------------------------------------------------------------- packages
 
-// -------------------------------------------------------------- word wrap
-
-class Wrapper {
-public:
-    explicit Wrapper(int indent) : indent_(indent), col_(indent) {}
-    void put(const char *s) {
-        for (; *s; s++) {
-            if (*s == '\n') { flush(); kputc('\n'); pad(); continue; }
-            if (*s == ' ') { flush(); if (col_ < 79) { kputc(' '); col_++; } continue; }
-            if ((unsigned char)*s < 32) continue;
-            word_ += *s;
-            if (word_.size() > 60) flush();
-        }
-    }
-    void flush() {
-        if (word_.empty()) return;
-        if (col_ + (int)word_.size() > 79) { kputc('\n'); pad(); }
-        print(word_.c_str());
-        col_ += (int)word_.size();
-        word_.clear();
-    }
-
-private:
-    void pad() { for (col_ = 0; col_ < indent_; col_++) kputc(' '); }
-    int indent_, col_;
-    String word_;
-};
-
-// ----------------------------------------------------------------- models
-
-void cmd_models(Shell &sh, const Args &a);
-void cmd_load(Shell &sh, const Args &a);
-void cmd_mp(Shell &sh, const Args &a);
 void cmd_meteo(Shell &sh, const Args &a);
 void cmd_doom(Shell &sh, const Args &a);
 void cmd_doomy(Shell &sh, const Args &a);
@@ -230,8 +174,8 @@ void list_packages() {
     Color c(VGA_YELLOW);
     print("Packages (delivered by ConMon Lab):\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    kprintf("  llm        AI chat: SmartestChild, Transformers.js, WebLLM, Ollama %s\n",
-            llm_installed ? "[installed]" : "");
+    kprintf("  ps2        PS2 games (Quake II) in the Play! PS2 emulator      %s\n",
+            ps2_installed ? "[installed]" : "");
     kprintf("  solMeteo   Live weather from Open-Meteo with an ASCII world map  %s\n",
             meteo_installed ? "[installed]" : "");
     kprintf("  doom       DOOM (shareware Episode 1) on ConMon's text screen    %s\n",
@@ -240,252 +184,20 @@ void list_packages() {
             doomy_installed ? "[installed]" : "");
     kprintf("  native doom  DOOM run by ConMon itself, 320x200 in 256 colours  %s\n",
             ndoom_installed ? "[installed]" : "");
-    print("Usage: install <name>    e.g. install solMeteo\n"
-          "       install llm all   installs llm and downloads every model\n");
+    print("Usage: install <name>    e.g. install ps2\n");
 }
 
-// Asks the host for the model list. Messages the host sends first (setup
-// hints for engines that aren't available) are printed unless quiet.
-bool fetch_models(bool quiet = false) {
-    hostlink_send("llm.models", "");
-    hl_packet p;
-    for (;;) {
-        bool cancelled;
-        if (!wait_packet(p, 60000, &cancelled)) { error(cancelled ? "Cancelled." : "The host did not answer."); return false; }
-        if (p.type == 'M') { if (!quiet) kprintf("%s\n", reinterpret_cast<const char *>(p.data)); continue; }
-        if (p.type == 'E') { error("%s", reinterpret_cast<const char *>(p.data)); return false; }
-        if (p.type == 'L') break;
-    }
+// ------------------------------------------------------------------- ps2
+//
+// A PlayStation 2 can't run on ConMon's 486, so ConMon Lab opens the Play!
+// PS2 emulator next to it. ConMon picks the game; the page plays it.
 
-    // One model per line: "A|engine:model-id|879 MB|Llama 3.2 1B|status|Engine heading"
-    models.clear();
-    const char *d = reinterpret_cast<const char *>(p.data);
-    while (*d) {
-        Model m;
-        m.letter = *d;
-        m.id     = field(d, 1);
-        m.size   = field(d, 2);
-        m.label  = field(d, 3);
-        m.status = field(d, 4);
-        m.engine = field(d, 5);
-        models.push_back(kstd::move(m));
-        while (*d && *d != '\n') d++;
-        if (*d == '\n') d++;
-    }
-    if (models.empty()) { error("No models can run on this device."); return false; }
-    return true;
-}
-
-void show_models() {
-    {
-        Color c(VGA_YELLOW);
-        print("\nAI models that can run here:\n");
-    }
-    const char *heading = "";
-    for (const auto &m : models) {
-        if (m.engine != heading) {                  // new engine section
-            heading = m.engine.c_str();
-            Color c(VGA_LIGHT_CYAN);
-            kprintf(" %s\n", heading);
-        }
-        Color c(m.status.empty() ? VGA_LIGHT_GREY : VGA_LIGHT_GREEN);
-        kprintf("   %c  %-30s %9s  %s\n", m.letter, m.label.c_str(), m.size.c_str(), m.status.c_str());
-    }
-    print("\n");
-}
-
-const Model *find_model(const char *text) {
-    char want = text[0];
-    if (want >= 'a' && want <= 'z') want = (char)(want - 32);
-    if (text[0] && !text[1]) {
-        for (const auto &m : models) if (m.letter == want) return &m;
-    }
-    return nullptr;
-}
-
-// Downloads (if needed) and loads a model so `load` can chat with it.
-bool prepare_model(Shell &sh, const Model &m) {
-    if (m.status.empty())
-        kprintf("Downloading %s (%s). This runs once; it's cached in your browser.\n",
-                m.label.c_str(), m.size.c_str());
-    else
-        kprintf("Getting %s ready...\n", m.label.c_str());
-    if (!host_job(sh, "llm.download", m.id.c_str())) return false;
-    ready_id = m.id;
-    ready_label = m.label;
-    return true;
-}
-
-bool pick_model(Shell &sh) {
-    if (!fetch_models()) return false;
-    show_models();
-    String choice = sh.editor().read("Type a letter to choose (Enter to skip): ", false, 2);
-    if (choice.empty()) { print("No model chosen. Type models to see the list again.\n"); return false; }
-    const Model *m = find_model(choice.c_str());
-    if (!m) { error("No model with letter %s.", choice.c_str()); return false; }
-    if (!prepare_model(sh, *m)) return false;
-    Color c(VGA_LIGHT_GREEN);
-    kprintf("%s is ready. Type load to talk with it.\n", m->label.c_str());
-    return true;
-}
-
-// "~270 MB" / "1.4 GB" -> megabytes (rough; only used for the total).
-uint32_t size_mb(const String &s) {
-    const char *p = s.c_str();
-    while (*p && (*p < '0' || *p > '9')) p++;
-    uint32_t whole = 0, frac = 0, fdiv = 1;
-    while (*p >= '0' && *p <= '9') whole = whole * 10 + (uint32_t)(*p++ - '0');
-    if (*p == '.') for (p++; *p >= '0' && *p <= '9' && fdiv < 1000; p++) { frac = frac * 10 + (uint32_t)(*p - '0'); fdiv *= 10; }
-    bool gb = false;
-    for (; *p; p++) if (*p == 'G') gb = true;
-    return gb ? whole * 1000 + frac * 1000 / fdiv : whole;
-}
-
-// install llm all: download every browser model in one go.
-void install_all_models(Shell &sh) {
-    if (!fetch_models(true)) return;
-    Vector<size_t> todo;
-    uint32_t total = 0;
-    for (size_t i = 0; i < models.size(); i++) {
-        const Model &m = models[i];
-        bool browser = strncmp(m.id.c_str(), "tfjs:", 5) == 0 || strncmp(m.id.c_str(), "webllm:", 7) == 0;
-        if (browser && m.status.empty()) { todo.push_back(i); total += size_mb(m.size); }
-    }
-    if (todo.empty()) {
-        Color c(VGA_LIGHT_GREEN);
-        print("Every model is already downloaded or ready. Type models to pick one.\n");
-        return;
-    }
-    {
-        Color c(VGA_YELLOW);
-        kprintf("This downloads %u models, about %u.%u GB, into your browser's storage.\n",
-                (uint32_t)todo.size(), total / 1000, (total % 1000) / 100);
-    }
-    print("SmartestChild and Ollama models need no download. Ctrl+C stops at any time.\n");
-    String yes = sh.editor().read("Download them all? (y/N): ", false, 3);
-    if (yes.empty() || (yes[0] != 'y' && yes[0] != 'Y')) { print("Skipped. Type models to pick just one.\n"); return; }
-
-    uint32_t ok = 0;
-    for (size_t n = 0; n < todo.size(); n++) {
-        const Model &m = models[todo[n]];
-        {
-            Color c(VGA_WHITE);
-            kprintf("[%u/%u] %c  %s (%s)\n", (uint32_t)(n + 1), (uint32_t)todo.size(), m.letter, m.label.c_str(), m.size.c_str());
-        }
-        JobResult r = host_job_ex(sh, "llm.fetch", m.id.c_str());   // download, then free memory
-        if (r == JOB_CANCELLED) break;
-        if (r == JOB_OK) { ok++; ready_id = m.id; ready_label = m.label; }
-    }
-    Color c(ok ? VGA_LIGHT_GREEN : VGA_YELLOW);
-    kprintf("Downloaded %u of %u models. Type models to see them, or load <letter> to chat.\n",
-            ok, (uint32_t)todo.size());
-}
-
-void cmd_models(Shell &sh, const Args &a) {
+void cmd_run(Shell &sh, const Args &a) {
+    String what = lower(a[1]);
+    if (a.count() < 2 || what != "game") { error("Usage: run game <letter>   (type install ps2 for the list)"); return; }
     if (!host_available()) { no_host(); return; }
-    if (a.count() > 1 && lower(a[1]) == "check") { host_job(sh, "llm.check", ""); return; }
-    pick_model(sh);
-}
-
-void chat(Shell &sh) {
-    {
-        Color c(VGA_YELLOW);
-        kprintf("Talking to %s.\n", ready_label.c_str());
-    }
-    print("Type exit to leave, reset for a new conversation, haiku on/off for the\n"
-          "Haiku advancement. Ctrl+C stops an answer. Code in answers is saved as files.\n");
-    show_host_message(sh, "llm.haiku", "");
-    print("\n");
-    for (;;) {
-        String line = sh.editor().read("you> ", false, 300);
-        if (line.empty()) continue;
-        if (line == "exit" || line == "quit") { print("Bye!\n"); return; }
-        if (line == "reset") {
-            hostlink_send("llm.reset", "");
-            print("(new conversation)\n");
-            continue;
-        }
-        if (line == "haiku" || line == "haiku on" || line == "haiku off") {
-            show_host_message(sh, "llm.haiku", line == "haiku" ? "" : line.c_str() + 6);
-            print("\n");
-            continue;
-        }
-        hostlink_send("llm.chat", line.c_str());
-        {
-            Color c(VGA_LIGHT_CYAN);
-            print("ai> ");
-        }
-        Wrapper w(4);
-        Color c(VGA_WHITE);
-        hl_packet p;
-        bool stopped = false, gone = false;
-        uint32_t stop_at = 0;
-        for (;;) {
-            bool cancelled;
-            if (!wait_packet(p, stopped ? 1000 : HOST_SILENCE_MS, &cancelled)) {
-                if (cancelled && !stopped) { hostlink_send("llm.stop", ""); stopped = true; stop_at = now_ms(); continue; }
-                if (stopped && now_ms() - stop_at < 6000) continue;
-                if (!stopped) gone = true;
-                break;                              // give up waiting for the rest
-            }
-            if (p.type == 'T') w.put(reinterpret_cast<const char *>(p.data));
-            else if (p.type == 'W') save_file(sh, p);
-            else if (p.type == 'Y') save_file(sh, p, true);
-            else if (p.type == 'M') {
-                w.flush();
-                Color g(VGA_LIGHT_GREEN);
-                kprintf("\n[%s]", reinterpret_cast<const char *>(p.data));
-            }
-            else if (p.type == 'X') break;
-            else if (p.type == 'E') { w.flush(); kputc('\n'); error("%s", reinterpret_cast<const char *>(p.data)); break; }
-            else if (p.type == 'P') { /* model still loading: ignore */ }
-        }
-        w.flush();
-        if (stopped) print(" [stopped]");
-        if (gone) { kputc('\n'); host_gone(false); }
-        print("\n\n");
-    }
-}
-
-void cmd_load(Shell &sh, const Args &a) {
-    if (!host_available()) { no_host(); return; }
-    if (a.count() > 1) {
-        if (models.empty() && !fetch_models(true)) return;
-        const Model *m = find_model(a[1]);
-        if (!m) { error("No model with letter %s. Type models to see the list.", a[1]); return; }
-        if (m->id != ready_id.c_str()) {
-            kprintf("Loading %s (%s)...\n", m->label.c_str(), m->size.c_str());
-            if (!host_job(sh, "llm.download", m->id.c_str())) return;
-            ready_id = m->id;
-            ready_label = m->label;
-        }
-    }
-    if (ready_id.empty()) {
-        error("No model chosen yet. Type models and pick one with its letter.");
-        return;
-    }
-    if (!host_job(sh, "llm.load", ready_id.c_str())) return;
-    chat(sh);
-}
-
-// mp finder [letter]: facts about the AI models (some fetched live).
-void cmd_mp(Shell &sh, const Args &a) {
-    if (a.count() < 2 || lower(a[1]) != "finder") {
-        print("usage: mp finder           overview of every AI model\n"
-              "       mp finder <letter>  details for one model, e.g. mp finder E\n");
-        return;
-    }
-    if (!host_available()) { no_host(); return; }
-    if (models.empty() && !fetch_models(true)) return;
-    String target;
-    if (a.count() > 2) {
-        const Model *m = find_model(a[2]);
-        if (!m) { error("No model with letter %s. Type mp finder to see the letters.", a[2]); return; }
-        target = m->id;
-        Color c(VGA_LIGHT_CYAN);
-        kprintf("Finding info on %s...\n", m->label.c_str());
-    }
-    host_job(sh, "llm.info", target.c_str());
+    if (a.count() < 3) { host_job(sh, "ps2.list", ""); return; }
+    host_job(sh, "ps2.run", a[2]);
 }
 
 // ------------------------------------------------------------------ meteo
@@ -701,14 +413,14 @@ void cmd_android(Shell &sh, const Args &) {
 void cmd_install(Shell &sh, const Args &a) {
     if (a.count() < 2) { list_packages(); return; }
     String name = lower(a[1]);
-    bool llm = name == "llm";
+    bool ps2 = name == "ps2";
     bool meteo = name == "solmeteo" || name == "meteo";
     bool doom = name == "doom";
     bool doomy = name == "doomy";
     bool ndoom = name == "native" && a.count() > 2 && lower(a[2]) == "doom";
     if (name == "native" && !ndoom) { error("Did you mean install native doom?"); return; }
     if (ndoom) doom = false;
-    if (!llm && !meteo && !doom && !doomy && !ndoom) { error("No package named %s. Type install to see the list.", a[1]); return; }
+    if (!ps2 && !meteo && !doom && !doomy && !ndoom) { error("No package named %s. Type install to see the list.", a[1]); return; }
     if (!host_available()) { no_host(); return; }
 
     if (ndoom) {
@@ -771,30 +483,21 @@ void cmd_install(Shell &sh, const Args &a) {
         return;
     }
 
-    String opt = lower(a[2]);
-    bool all = opt == "all" || opt == "{all}";
-    if (a.count() > 2 && !all) { error("Unknown option %s. Try: install llm all", a[2]); return; }
-
-    if (!host_job(sh, "pkg.install", "llm")) return;
-    llm_installed = true;
-    if (!sh.has("load")) {
-        sh.add(new FnCommand("models", "models [check]", "pick an AI model (llm package)", cmd_models));
-        sh.add(new FnCommand("load", "load [letter]", "talk to the AI model (llm package)", cmd_load));
-        sh.add(new FnCommand("mp", "mp finder [letter]", "info on the AI models (llm package)", cmd_mp));
-    }
+    if (!host_job(sh, "pkg.install", "ps2")) return;
+    ps2_installed = true;
+    if (!sh.has("run"))
+        sh.add(new FnCommand("run", "run game <letter>", "play a PS2 game (ps2 package)", cmd_run));
     {
         Color c(VGA_LIGHT_GREEN);
-        print("Installed llm. ");
+        print("Installed ps2. ");
     }
-    print("New commands: models, load, mp finder.\n");
-    if (all) install_all_models(sh);
-    else pick_model(sh);
+    print("New command: run game <letter>, e.g. run game A\n");
 }
 
 } // namespace
 
 void packages_register(Shell &sh) {
-    sh.add(new FnCommand("install", "install <package>", "install llm, solMeteo, doom, doomy or native doom", cmd_install));
+    sh.add(new FnCommand("install", "install <package>", "install ps2, solMeteo, doom, doomy or native doom", cmd_install));
     sh.add(new FnCommand("apple", "apple", "iPhone kernel (XNU) info from the ConMon XNU app", cmd_apple));
     sh.add(new FnCommand("android", "android", "open Android running on your own server", cmd_android));
 }
