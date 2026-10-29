@@ -183,7 +183,7 @@
   let ps2Games = null;
   async function ps2List() {
     if (!ps2Games) {
-      const res = await fetch("/ps2/games.json");
+      const res = await fetch("/ps2/games.json", { cache: "no-cache" });
       if (!res.ok) throw new Error("Couldn't load the PS2 game list.");
       ps2Games = (await res.json()).games;
     }

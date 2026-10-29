@@ -49,21 +49,20 @@
         <div class="card">
           <h1 id="title">PS2 game</h1>
           <p class="muted small" id="about"></p>
-          <div id="need" hidden>
-            <p id="need-text"></p>
-            <button class="btn" id="pick" type="button">Choose pak0.pak</button>
-            <input type="file" id="file" hidden>
-          </div>
-          <p class="small" id="have" hidden></p>
-          <button class="btn primary" id="start" type="button" disabled>Start</button>
+          <button class="btn primary" id="start" type="button" disabled>Play</button>
           <div class="bar"><i id="bar"></i></div>
           <p class="small muted" id="status">Checking this browser…</p>
         </div>
       </div>
     </div>
     <div class="row"><span class="stat" id="fps"></span><span class="sp"></span>
-      <button class="btn" id="full" type="button">Full screen</button>
-      <button class="btn" id="forget" type="button" hidden>Forget game data</button></div>
+      <button class="btn" id="full" type="button">Full screen</button></div>
+    <div id="need" hidden>
+      <p class="small muted"><span id="have"></span> <span id="need-text"></span></p>
+      <button class="btn" id="pick" type="button">Use my own pak0.pak</button>
+      <input type="file" id="file" hidden>
+      <button class="btn" id="forget" type="button" hidden>Back to the demo</button>
+    </div>
     <div class="pad" id="pad">
       <button data-code="ArrowUp">▲</button><button data-code="ArrowDown">▼</button><button data-code="ArrowLeft">◀</button><button data-code="ArrowRight">▶</button><button data-code="KeyZ">✕ Fire</button><button data-code="KeyX">○</button>
       <button data-code="KeyT">Walk</button><button data-code="KeyG">Back</button><button data-code="KeyF">Strafe ◀</button><button data-code="KeyH">Strafe ▶</button><button data-code="KeyA">□</button><button data-code="KeyS">△</button>
@@ -73,6 +72,6 @@
     <p class="small muted">Emulator: <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a> by Jean-Philip Desjardins (BSD-2-Clause), compiled to WebAssembly. <span id="credit"></span> PS2 emulation is heavy: a recent computer runs it best; phones are slow.</p>
     <details><summary>Emulator log</summary><pre id="log"></pre></details>
   </main>
-  <script type="module" src="ps2.js"></script>
+  <script type="module" src="ps2.js?v=3"></script>
 </body>
 </html>

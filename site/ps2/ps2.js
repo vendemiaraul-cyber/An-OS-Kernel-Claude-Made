@@ -77,10 +77,10 @@ async function keep(file) {
 }
 
 function showHave(text) {
-  ui.have.hidden = false;
   ui.have.textContent = text;
   ui.start.disabled = false;
 }
+let running = false;
 
 ui.pick.addEventListener("click", () => ui.file.click());
 ui.file.addEventListener("change", async () => {
@@ -89,17 +89,20 @@ ui.file.addEventListener("change", async () => {
   const bad = await checkData(f);
   if (bad) { status(bad, true); return; }
   data = f;
-  showHave(`Using ${f.name} (${(f.size / 1048576).toFixed(0)} MB).`);
-  status("Saving a copy in this browser so you won't need to pick it again…");
+  ui.have.textContent = "Saving your " + storedName() + " in this browser…";
   const kept = await keep(f);
   if (kept) { data = (await loadStored()) || f; ui.forget.hidden = false; }
-  status(kept ? "Ready. Tap Start." : "Ready. Tap Start. (This browser can't keep the file, so you'll pick it again next time.)");
+  ui.have.textContent = running
+    ? "Saved. Reload this page to play the full game."
+    : `Using your ${storedName()}: the full game.` + (kept ? "" : " (This browser can't keep it; you'll pick it again next time.)");
+  ui.needText.textContent = "";
 });
 ui.forget.addEventListener("click", async () => {
   const dir = await opfsDir(false);
   if (dir) try { await dir.removeEntry(storedName()); } catch (_) {}
   ui.forget.hidden = true;
-  status("Removed the saved game data from this browser.");
+  data = null;
+  ui.have.textContent = running ? "Removed. Reload this page for the demo." : "Using " + game.demo.label + ".";
 });
 
 // ------------------------------------------------------------ emulator
@@ -154,8 +157,9 @@ function writeFile(FS, path, bytes) {
 }
 
 async function start() {
+  if (running) return;
+  running = true;
   ui.start.disabled = true;
-  ui.pick.disabled = true;
   try {
     status("Downloading the Play! PS2 emulator…");
     bar(0.02);
@@ -211,7 +215,7 @@ async function start() {
     status(e && e.message ? e.message : String(e), true);
     log("[ConMon] " + (e && e.stack ? e.stack : e));
     ui.start.disabled = false;
-    ui.pick.disabled = false;
+    running = false;
   }
 }
 ui.start.addEventListener("click", start);
@@ -242,7 +246,7 @@ for (const b of ui.pad.querySelectorAll("button")) {
 (async () => {
   const id = new URLSearchParams(location.search).get("game") || "quake2";
   try {
-    const list = await (await fetch("games.json")).json();
+    const list = await (await fetch("games.json", { cache: "no-cache" })).json();
     game = list.games.find((g) => g.id === id || g.letter.toLowerCase() === id.toLowerCase());
   } catch (_) {}
   if (!game) { status(`No PS2 game called "${id}".`, true); return; }
@@ -280,23 +284,26 @@ for (const b of ui.pad.querySelectorAll("button")) {
   if (game.needs) {
     ui.need.hidden = false;
     ui.needText.textContent = game.demo
-      ? `Plays ${game.demo.label}. For the whole game, choose ${game.needs.what}; it stays in this browser and nothing is uploaded.`
+      ? `Own Quake II? Use ${game.needs.what} for the whole game. It stays in this browser; nothing is uploaded.`
       : "This game needs " + game.needs.what + ". It stays in this browser; nothing is uploaded.";
-    ui.pick.textContent = (game.demo ? "Full game: choose " : "Choose ") + storedName();
     const stored = await loadStored();
     if (stored && !(await checkData(stored))) {
       data = stored;
       ui.forget.hidden = false;
-      showHave(`Found your ${storedName()} saved in this browser (${(stored.size / 1048576).toFixed(0)} MB): the full game.`);
-      status("Ready. Tap Start.");
+      ui.needText.textContent = "";
+      showHave(`Playing the full game with your ${storedName()} (${(stored.size / 1048576).toFixed(0)} MB).`);
     } else if (game.demo) {
-      showHave("Using " + game.demo.label + ".");
-      status("Ready. Tap Start.");
+      showHave("Playing " + game.demo.label + ".");
     } else {
-      status(`Choose ${storedName()} to continue.`);
+      status(`Choose ${storedName()} below to continue.`);
+      return;
     }
+    status("Ready.");
+    // Opened from Kernel Lab's Play button: start right away.
+    if (new URLSearchParams(location.search).get("go") === "1") start();
   } else {
     ui.start.disabled = false;
-    status("Ready. Tap Start.");
+    status("Ready.");
+    if (new URLSearchParams(location.search).get("go") === "1") start();
   }
 })();

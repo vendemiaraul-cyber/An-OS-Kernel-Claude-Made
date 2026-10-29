@@ -10,7 +10,10 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (e) => {
   const r = e.request;
   if (r.cache === "only-if-cached" && r.mode !== "same-origin") return;
-  e.respondWith(fetch(r).then((res) => {
+  // Revalidate every file, so a new version of the site is never hidden by
+  // a stale copy in the browser's cache.
+  const req = r.mode === "navigate" ? r : new Request(r, { cache: "no-cache" });
+  e.respondWith(fetch(req).then((res) => {
     if (res.status === 0) return res;        // opaque: leave it alone
     const h = new Headers(res.headers);
     h.set("Cross-Origin-Embedder-Policy", "require-corp");

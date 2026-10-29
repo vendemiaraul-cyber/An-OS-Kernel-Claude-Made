@@ -393,7 +393,7 @@
   $("ps2-close").addEventListener("click", () => { ps2.win.hidden = true; ui.fit.focus({ preventScroll: true }); });
   ps2.play.addEventListener("click", () => {
     if (!ps2.game) return;
-    window.open("/ps2/?game=" + encodeURIComponent(ps2.game.id), "_blank");
+    window.open("/ps2/?game=" + encodeURIComponent(ps2.game.id) + "&go=1", "_blank");
     ps2.win.hidden = true;
   });
 
