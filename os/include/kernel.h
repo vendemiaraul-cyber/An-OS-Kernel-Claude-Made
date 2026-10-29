@@ -70,6 +70,18 @@ void    vga_set_palette16(const uint8_t *rgb);  /* 16 x (r,g,b), 0-63 each */
 void    vga_reset_palette(void);
 void    vga_disable_blink(void);        /* attribute bit 7 = bright background */
 
+/* ---------- VBE graphics (drivers/vbe.c) ---------- */
+int      vbe_available(void);
+uint8_t *vbe_set_mode(int w, int h, int bpp, int *pitch);   /* NULL if unsupported */
+void     vbe_text_mode(void);
+int      vbe_active(void);
+void     vga_set_palette256(const uint8_t *rgb, int first, int count);  /* 8-bit values */
+
+/* ---------- extensions (kernel/ext.c, include/conmon_ext.h) ---------- */
+int ext_check(uint32_t data_size, char *err, int errlen);
+int ext_run(uint32_t data_size, const char *data_name, const char *args,
+            uint32_t *frames, char *msg, int msglen);
+
 /* ---------- serial port COM1 (drivers/serial.c) ---------- */
 void serial_init(void);
 void serial_enable_rx(void);            /* interrupt-driven receive (IRQ4) */

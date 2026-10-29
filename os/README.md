@@ -59,6 +59,10 @@ host -> ConMon:  STX <type> <len lo> <len hi> <payload>
   using a 16-colour palette ConMon loads into the VGA DAC. F12 quits.
 - `install doomy`: adds `doomy`, the same idea with a small game written in
   Python that the host runs with Pyodide.
+- `install native doom`: adds `native doom`. Here ConMon runs DOOM itself:
+  the host writes an extension (`../ext/`) and the WAD into memory, and
+  ConMon (`kernel/ext.c`) checks its CRC, turns on the FPU, switches to
+  320x200x8 VBE graphics (`drivers/vbe.c`) and calls it on its own stack.
 
 On QEMU or a real PC there is no host, and `install` says so.
 

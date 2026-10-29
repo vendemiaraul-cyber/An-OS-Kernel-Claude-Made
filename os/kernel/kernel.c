@@ -7,7 +7,10 @@ struct multiboot_info {
     uint32_t flags;
     uint32_t mem_lower;     /* KiB below 1 MiB  (flags bit 0) */
     uint32_t mem_upper;     /* KiB above 1 MiB  (flags bit 0) */
-    /* ...remaining fields unused... */
+    uint32_t boot_device, cmdline, mods_count, mods_addr;
+    uint32_t syms[4];
+    uint32_t mmap_length;   /* memory map (flags bit 6) */
+    uint32_t mmap_addr;
 };
 
 extern char __kernel_end[];
@@ -47,7 +50,15 @@ void kmain(uint32_t magic, struct multiboot_info *mbi) {
 
     if (mbi->flags & 1)
         total_mem_kb = 1024 + mbi->mem_upper;
-    else
+    else if (mbi->flags & (1 << 6)) {       /* v86 gives only the memory map */
+        uint32_t end = 0;
+        for (uint32_t p = mbi->mmap_addr; p < mbi->mmap_addr + mbi->mmap_length; ) {
+            const uint32_t *e = (const uint32_t *)(uintptr_t)p;    /* size, base lo/hi, len lo/hi, type */
+            if (e[5] == 1 && e[2] == 0 && e[1] + e[3] > end) end = e[1] + e[3];
+            p += e[0] + 4;
+        }
+        total_mem_kb = end ? end / 1024 : 32 * 1024;
+    } else
         total_mem_kb = 32 * 1024;           /* conservative guess */
 
     gdt_init();

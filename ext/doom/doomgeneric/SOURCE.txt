@@ -1,0 +1,3 @@
+doomgeneric by ozkl, from https://github.com/ozkl/doomgeneric
+commit e257a09527062bfb986b6e5e0780839b6cbd5b71, GPL-2.0 (LICENSE).
+Only the files ConMon builds are copied; none are changed.

@@ -64,3 +64,12 @@ void kpanic(const char *msg) {
     fprintf(stderr, "kpanic: %s\n", msg);
     longjmp(test_done, 4);
 }
+
+/* VBE + extensions: no graphics card or extension in host tests */
+int vbe_available(void) { return 0; }
+uint8_t *vbe_set_mode(int w, int h, int bpp, int *pitch) { (void)w; (void)h; (void)bpp; (void)pitch; return 0; }
+void vbe_text_mode(void) {}
+int vbe_active(void) { return 0; }
+void vga_set_palette256(const uint8_t *rgb, int first, int count) { (void)rgb; (void)first; (void)count; }
+int ext_check(uint32_t d, char *e, int n) { (void)d; (void)e; (void)n; return 0; }
+int ext_run(uint32_t d, const char *dn, const char *a, uint32_t *f, char *m, int n) { (void)d; (void)dn; (void)a; (void)f; (void)m; (void)n; return -1; }

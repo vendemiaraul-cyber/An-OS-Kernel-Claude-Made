@@ -11,7 +11,9 @@ A Netlify site with two apps:
   offline use and `cities Italy`-style browsing) with an animated ASCII world map.
   `install doom` plays the real DOOM (shareware Episode 1) on ConMon's text
   screen; `install doomy` plays doomy, a small DOOM-style game written in
-  Python, run in the browser by Pyodide. The page does the work and streams
+  Python, run in the browser by Pyodide. `install native doom` adds
+  `native doom`: DOOM compiled for ConMon and run by ConMon's own CPU at
+  320×200 in 256 colours, as a ConMon *extension* (see `ext/`). The page does the work and streams
   the results into ConMon over its serial port.
   The **Bundled kernels** list also boots a real **Linux 6.6** kernel with a
   BusyBox shell (one 1.5 MB bzImage), MikeOS, Tetros, bootBASIC, bootOS and
@@ -38,6 +40,7 @@ site/                      static site Netlify publishes
 netlify/functions/
   youtube.mjs              /api/youtube proxy that adds YOUTUBE_API_KEY
 os/                        ConMon source (C, C++, NASM) - see os/README.md
+ext/                       ConMon extensions: a small libc and DOOM (make -> site/doom/ndoom.cmx)
 tools/                     doom.bas (MikeOS DOOM launcher), fat12_add.py,
                            linux/ (configs, root files and build.sh for linux.bzimage)
 preview/                   builds the offline preview (python3 preview/build.py)
@@ -88,6 +91,19 @@ make samples       # rebuilds samples/hello-floppy.img
 cp conmon.bin ../site/kernels/conmon.bin
 ```
 
+## Rebuild native DOOM
+
+```sh
+cd ext && make     # -> site/doom/ndoom.cmx (needs gcc with -m32)
+```
+
+An extension (`.cmx`) is a flat 32-bit program linked at 20 MiB with a
+small header and CRC-32 (`os/include/conmon_ext.h`). For `native doom` the
+page writes it and the shareware WAD straight into the emulated PC's memory,
+then ConMon checks it, switches to VBE graphics and calls it with an API
+table (timer, raw keyboard, graphics, memory). The WAD comes out of
+doom.wasm, checked by its SHA-1. It needs 48 MB of RAM or more.
+
 ## Rebuild the bundled Linux
 
 ```sh
@@ -135,6 +151,8 @@ size and GPU features fit the device.
 - DOOM: doom.wasm from jacobenget/doom.wasm, a WebAssembly port of id
   Software's DOOM source, GPL-2.0, with the freely distributable shareware
   DOOM1.WAD inside (`site/doom/`). DOOM is a trademark of id Software.
+- Native DOOM: doomgeneric by ozkl (GPL-2.0, `ext/doom/doomgeneric/`),
+  built into `site/doom/ndoom.cmx` with ConMon Lab's platform layer and libc.
 - Pyodide (MPL-2.0), loaded from the jsDelivr CDN when you `install doomy`.
   doomy itself is ConMon Lab's own code (MIT).
 - WebLLM by the MLC team, Apache-2.0, loaded from the esm.run CDN at runtime.

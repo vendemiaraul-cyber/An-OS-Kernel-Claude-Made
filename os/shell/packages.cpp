@@ -6,6 +6,7 @@
 //   install solMeteo         live weather + ASCII map  -> adds `meteo`
 //   install doom             DOOM on the text screen   -> adds `doom`
 //   install doomy            a DOOM-style game in Python (Pyodide) -> adds `doomy`
+//   install native doom      DOOM run by ConMon itself, 320x200 -> adds `native doom`
 //
 // ConMon can't run a neural network or reach the internet itself, so
 // packages work through the host link (kernel/hostlink.c): ConMon Lab, the
@@ -13,11 +14,12 @@
 // results back over the serial port. On QEMU or a real PC there is no host,
 // and install says so.
 #include "shell.hpp"
+#include "conmon_ext.h"
 
 namespace {
 
 bool host_ok;
-bool llm_installed, meteo_installed, doom_installed, doomy_installed;
+bool llm_installed, meteo_installed, doom_installed, doomy_installed, ndoom_installed;
 
 struct Model {
     char   letter;
@@ -113,7 +115,7 @@ void draw_progress(int pct, const char *text) {
 enum JobResult { JOB_OK, JOB_ERROR, JOB_CANCELLED };
 
 // Sends a request and follows the host's progress until it finishes.
-JobResult host_job_ex(Shell &sh, const char *type, const char *payload) {
+JobResult host_job_ex(Shell &sh, const char *type, const char *payload, String *done = nullptr) {
     hostlink_send(type, payload);
     bool showed_bar = false, cancelled = false;
     hl_packet p;
@@ -142,6 +144,7 @@ JobResult host_job_ex(Shell &sh, const char *type, const char *payload) {
             break;
         case 'D':
             if (showed_bar) kputc('\n');
+            if (done) *done = d;
             return JOB_OK;
         case 'E':
             if (showed_bar) kputc('\n');
@@ -153,8 +156,8 @@ JobResult host_job_ex(Shell &sh, const char *type, const char *payload) {
     }
 }
 
-bool host_job(Shell &sh, const char *type, const char *payload) {
-    return host_job_ex(sh, type, payload) == JOB_OK;
+bool host_job(Shell &sh, const char *type, const char *payload, String *done = nullptr) {
+    return host_job_ex(sh, type, payload, done) == JOB_OK;
 }
 
 // -------------------------------------------------------------- word wrap
@@ -206,6 +209,8 @@ void list_packages() {
             doom_installed ? "[installed]" : "");
     kprintf("  doomy      A DOOM-style game written in Python (runs in Pyodide)  %s\n",
             doomy_installed ? "[installed]" : "");
+    kprintf("  native doom  DOOM run by ConMon itself, 320x200 in 256 colours  %s\n",
+            ndoom_installed ? "[installed]" : "");
     print("Usage: install <name>    e.g. install solMeteo\n"
           "       install llm all   installs llm and downloads every model\n");
 }
@@ -584,6 +589,44 @@ void cmd_doomy(Shell &, const Args &) {
     play_hosted_game("doomy", "doomy.start", "doomy.k", "doomy.stop");
 }
 
+// native doom: DOOM compiled for ConMon (ext/ in the repo). The host writes
+// the extension and the WAD straight into memory; ConMon checks and runs it.
+void cmd_native(Shell &sh, const Args &a) {
+    if (a.count() < 2 || lower(a[1]) != "doom") { error("Usage: native doom"); return; }
+    if (!host_available()) { no_host(); return; }
+    if (sys_mem_kb() < CMX_MIN_RAM_KB) {
+        char m[100];
+        ksnprintf(m, sizeof m, "native doom needs 48 MB of RAM; this PC has %u MB. Pick 64 MB and boot again.", sys_mem_kb() / 1024);
+        error("%s", m);
+        return;
+    }
+    if (!vbe_available()) { error("No VBE graphics card found."); return; }
+    char req[96];
+    ksnprintf(req, sizeof req, "doom|%x|%x|%x|%x", CMX_LOAD_ADDR, CMX_IMAGE_MAX, CMX_DATA_ADDR, CMX_DATA_MAX);
+    String done;
+    if (!host_job(sh, "ext.load", req, &done)) return;
+    uint32_t data_size = (uint32_t)atoi(field(done.c_str(), 1).c_str());
+    char err[96];
+    if (!ext_check(data_size, err, sizeof err)) { error("%s", err); return; }
+    print("Starting DOOM. F12 comes back to ConMon.\n");
+    timer_sleep(400);
+    uint32_t start = timer_ticks(), frames = 0;
+    char msg[160];
+    int r = ext_run(data_size, "doom1.wad", "", &frames, msg, sizeof msg);
+    hostlink_send("ext.done", "doom");
+    uint32_t secs10 = (timer_ticks() - start) * 10 / TIMER_HZ;
+    vga_clear();
+    vga_cursor_visible(1);
+    if (r != 0 && msg[0]) { String m("DOOM stopped: "); m += msg; error("%s", m.c_str()); }
+    if (secs10) {
+        uint32_t fps10 = frames * 100 / secs10;
+        kprintf("Native DOOM drew %u frames in %u.%u s: %u.%u frames a second", frames,
+                secs10 / 10, secs10 % 10, fps10 / 10, fps10 % 10);
+        print(fps10 >= 350 ? " (full speed: DOOM's game runs at 35).\n" : ".\n");
+    }
+    print("Back in ConMon. Type native doom to play again.\n");
+}
+
 void doom_controls() {
     print("  Arrows move and turn    Ctrl fire    Space open doors    Shift run\n"
           "  Alt+arrows or , . strafe    1-7 weapons    Tab map    Esc menu\n"
@@ -599,8 +642,26 @@ void cmd_install(Shell &sh, const Args &a) {
     bool meteo = name == "solmeteo" || name == "meteo";
     bool doom = name == "doom";
     bool doomy = name == "doomy";
-    if (!llm && !meteo && !doom && !doomy) { error("No package named %s. Type install to see the list.", a[1]); return; }
+    bool ndoom = name == "native" && a.count() > 2 && lower(a[2]) == "doom";
+    if (name == "native" && !ndoom) { error("Did you mean install native doom?"); return; }
+    if (ndoom) doom = false;
+    if (!llm && !meteo && !doom && !doomy && !ndoom) { error("No package named %s. Type install to see the list.", a[1]); return; }
     if (!host_available()) { no_host(); return; }
+
+    if (ndoom) {
+        if (!host_job(sh, "pkg.install", "nativedoom")) return;
+        ndoom_installed = true;
+        if (!sh.has("native"))
+            sh.add(new FnCommand("native", "native doom", "DOOM run by ConMon itself (F12 quits)", cmd_native));
+        {
+            Color c(VGA_LIGHT_GREEN);
+            print("Installed native doom. ");
+        }
+        print("New command: native doom. Here ConMon's own CPU runs DOOM and draws\n"
+              "320x200 in 256 colours (the doom command lets the page run it instead).\n"
+              "  Arrows move   Ctrl fire   Space use/open   Shift run   F12 back\n");
+        return;
+    }
 
     if (doomy) {
         if (!host_job(sh, "pkg.install", "doomy")) return;
@@ -670,7 +731,7 @@ void cmd_install(Shell &sh, const Args &a) {
 } // namespace
 
 void packages_register(Shell &sh) {
-    sh.add(new FnCommand("install", "install <package>", "install llm, solMeteo, doom or doomy", cmd_install));
+    sh.add(new FnCommand("install", "install <package>", "install llm, solMeteo, doom, doomy or native doom", cmd_install));
 }
 
 // Handles messages the host sends on its own while the shell waits for input.

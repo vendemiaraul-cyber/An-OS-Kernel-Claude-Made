@@ -47,7 +47,7 @@
   let emu = null;
   let onState = () => {};
   let onWindow = null;
-  const state = { meteo: false, llm: false, doom: false, doomy: false, game: "", gpu: "unknown", model: null, modelLabel: "", busy: "" };
+  const state = { meteo: false, llm: false, doom: false, doomy: false, nativedoom: false, game: "", gpu: "unknown", model: null, modelLabel: "", busy: "" };
 
   // ------------------------------------------------------------ framing
 
@@ -109,6 +109,7 @@
           if (arg === "solmeteo") await installMeteo();
           else if (arg === "doom") await installDoom();
           else if (arg === "doomy") await installDoomy();
+          else if (arg === "nativedoom") await installNativeDoom();
           else if (arg === "llm") await installLlm();
           else sendText("E", `Unknown package ${arg}`);
           break;
@@ -123,6 +124,8 @@
         case "meteo.cities": await listCities(arg); break;
         case "doom.start": await startDoom(); break;
         case "doomy.start": await startDoomy(); break;
+        case "ext.load": await loadExtension(arg); break;
+        case "ext.done": if (state.game === "native doom") { state.game = ""; onState(state); } break;
         case "doom.k": case "doomy.k": gameKeys(arg); break;
         case "doom.stop": case "doomy.stop": stopGame(null); break;
         case "game.ack": game.acked = true; break;
@@ -1248,6 +1251,69 @@
       if (!doom.tick()) return;
       pumpGame();
     }, 28);                                                 // DOOM runs at 35 tics a second
+  }
+
+  // --------------------------------------------------------- native doom
+  //
+  // DOOM compiled for ConMon itself (ext/ in the repo): a .cmx extension.
+  // The host writes it and the shareware WAD straight into the PC's memory
+  // where ConMon asks; ConMon checks the CRC and runs it on its own CPU.
+  // The WAD is the one already inside doom.wasm, checked by its SHA-1.
+
+  const NDOOM_URL = "/doom/ndoom.cmx";
+  const WAD_SHA1 = "5b2e249b9c5133ec987b3ea77596381dc0d6bc1d";   // DOOM 1.9 shareware
+  let ndoom = null;                                                // { cmx, wad }
+
+  async function sha1hex(bytes) {
+    if (!(crypto && crypto.subtle)) return WAD_SHA1;                 // no WebCrypto: trust the size check
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+    return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // Finds the IWAD inside doom.wasm's data and checks it.
+  async function findWad(wasmBytes) {
+    const u8 = new Uint8Array(wasmBytes), dv = new DataView(wasmBytes);
+    for (let i = 0; i + 12 < u8.length; i++) {
+      if (u8[i] !== 0x49 || u8[i + 1] !== 0x57 || u8[i + 2] !== 0x41 || u8[i + 3] !== 0x44) continue;   // "IWAD"
+      const lumps = dv.getInt32(i + 4, true), dir = dv.getInt32(i + 8, true);
+      if (lumps <= 0 || lumps > 4000 || dir <= 0 || i + dir + lumps * 16 > u8.length) continue;
+      const wad = u8.slice(i, i + dir + lumps * 16);
+      if (await sha1hex(wad) === WAD_SHA1) return wad;
+    }
+    throw new Error("Couldn't find the DOOM shareware WAD.");
+  }
+
+  async function fetchBytes(url, onProgress) {
+    if (window.CONMON_IMAGES && window.CONMON_IMAGES.has(url.split("/").pop())) return new Uint8Array(window.CONMON_IMAGES.get(url.split("/").pop()));
+    const blob = await fetchWithProgress(url, onProgress || (() => {}));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  async function installNativeDoom() {
+    setBusy("installing native doom");
+    progress(0, "Downloading DOOM for ConMon");
+    const cmx = await fetchBytes(NDOOM_URL, (f) => progress(f * 20, "Downloading DOOM for ConMon"));
+    progress(20, "Downloading the shareware WAD (4.6 MB)");
+    const wasm = await fetchBytes(DOOM_URL, (f) => progress(20 + f * 70, "Downloading the shareware WAD (4.6 MB)"));
+    progress(92, "Checking the WAD");
+    const wad = await findWad(wasm.buffer);
+    progress(100, "native doom ready");
+    ndoom = { cmx, wad };
+    state.nativedoom = true;
+    setBusy("");
+    send("D", "nativedoom");
+  }
+
+  async function loadExtension(arg) {
+    const [name, load, max, dataAt, dataMax] = arg.split("|");
+    if (name !== "doom" || !ndoom) throw new Error("Type install native doom first.");
+    const n = (h) => parseInt(h, 16);
+    if (ndoom.cmx.length > n(max) || ndoom.wad.length > n(dataMax)) throw new Error("This DOOM doesn't fit ConMon's memory layout.");
+    emu.write_memory(ndoom.cmx, n(load));
+    emu.write_memory(ndoom.wad, n(dataAt));
+    send("D", `${ndoom.cmx.length}|${ndoom.wad.length}`);
+    state.game = "native doom";                 // shows the game pad on phones
+    onState(state);
   }
 
   // -------------------------------------------------------------- doomy

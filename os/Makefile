@@ -26,7 +26,7 @@ LDFLAGS  = $(ARCH) -T linker.ld -nostdlib -ffreestanding -no-pie -Wl,--build-id=
 
 ASM_SRC = boot/boot.asm boot/interrupts.asm
 C_SRC   = kernel/kernel.c kernel/hostlink.c cpu/gdt.c cpu/idt.c drivers/vga.c drivers/serial.c \
-          drivers/timer.c drivers/keyboard.c mm/kheap.c lib/string.c lib/kprintf.c
+          drivers/timer.c drivers/keyboard.c drivers/vbe.c kernel/ext.c mm/kheap.c lib/string.c lib/kprintf.c
 CXX_SRC = shell/cxxrt.cpp shell/shell.cpp shell/ramfs.cpp shell/calc.cpp shell/packages.cpp
 
 OBJ = $(patsubst %,build/%.o,$(ASM_SRC) $(C_SRC) $(CXX_SRC))

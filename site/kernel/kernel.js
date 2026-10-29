@@ -245,7 +245,7 @@
     ui.pkgLlm.className = "pill" + (st.llm ? " on" : "");
     ui.pkgGpu.textContent = st.gpu === "available" ? "WebGPU available" : st.gpu === "not available" ? "no WebGPU in this browser" : "WebGPU: checking…";
     ui.pkgModel.textContent = st.model ? "model: " + (st.modelLabel || st.model.replace(/-MLC$/, "")) : "no model loaded";
-    for (const name of ["doom", "doomy"]) {
+    for (const name of ["doom", "doomy", "nativedoom"]) {
       const el = document.getElementById("pkg-" + name);
       if (el) { el.textContent = st[name] ? "installed" : "not installed"; el.className = "pill" + (st[name] ? " on" : ""); }
     }
