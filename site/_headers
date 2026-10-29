@@ -1,0 +1,20 @@
+# Netlify headers for drag-and-drop (zip) deploys; netlify.toml has the same.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/v86/*
+  Cache-Control: public, max-age=604800
+
+/v86/v86.wasm
+  Content-Type: application/wasm
+
+# The PS2 page runs Play!, whose threads need SharedArrayBuffer, which
+# browsers only give a cross-origin isolated page.
+/ps2/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+
+/ps2/emu/*
+  Cache-Control: public, max-age=86400
