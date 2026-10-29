@@ -206,6 +206,19 @@ ConMon's RAM disk (`ls`, `cat index.html` after `exit`) and opened in a preview
 window on the page: web pages run live in a sandbox, other languages show as
 code with a Download button.
 
+## iPhone kernel info (apple) and Android (android)
+
+- **apple**: the ConMon XNU iPhone app ([apple/](apple/)) reads the phone's own
+  XNU kernel (version, Darwin release, chip, cores, memory, boot time) with
+  `uname()` and `sysctl`. Its **Show in ConMon Lab** button opens Kernel Lab
+  with the info, and the `apple` command prints it. GitHub Actions builds the
+  app (Actions → *iOS app (ConMon XNU)*); install it with Sideloadly. Steps in
+  [apple/README.md](apple/README.md).
+- **android**: real Android 12 (Redroid) on your own ARM server, streamed to
+  the browser with ws-scrcpy behind HTTPS and a password. One-paste setup in
+  [android-server/README.md](android-server/README.md); then **Android (your
+  server)** in the bundled list, or the `android` command in ConMon.
+
 ## Credits and licences
 
 - v86 by Fabian Hemmer and contributors, BSD-2-Clause (`site/v86/LICENSE-v86.txt`).

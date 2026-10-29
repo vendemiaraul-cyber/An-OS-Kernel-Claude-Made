@@ -250,6 +250,24 @@
               <p class="small muted">It runs with 256 MB of RAM and takes a few minutes to start. On a phone it is slow; a computer works best.</p>
             </div>
           </div>
+          <!-- Android: real Android on the person's own server, streamed -->
+          <div class="vm-window byo-window" id="android-window" hidden role="dialog" aria-label="Android on your server">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">Android · real Android 12 on your server</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="android-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p>Android is too big for the in-browser PC, so it runs on a small ARM server you own (Oracle Cloud Free Tier works) and streams here.</p>
+              <ol>
+                <li>Set the server up once with the script in <a href="https://github.com/vendemiaraul-cyber/An-OS-Kernel-Claude-Made/tree/main/android-server" target="_blank" rel="noopener">android-server</a> (one paste over SSH).</li>
+                <li>Paste the <span class="mono">https://…</span> address it printed, then tap Open and sign in with its user and password.</li>
+              </ol>
+              <input class="field" id="android-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://1-2-3-4.sslip.io" style="width:100%;margin:6px 0">
+              <button class="btn primary" id="android-open" type="button">Open Android</button>
+              <p class="small muted" id="android-status"></p>
+            </div>
+          </div>
           <!-- Files an AI wrote, shown live -->
           <div class="vm-window preview-window" id="preview-window" hidden role="dialog" aria-label="File preview">
             <div class="vm-title">
@@ -347,6 +365,9 @@
             <button class="sample" data-sample="reactos">
               <b>ReactOS (Windows-like)</b><span>CD image · open-source Windows look-alike with a desktop · bring the .iso</span>
             </button>
+            <button class="sample" data-sample="android">
+              <b>Android (your server)</b><span>Real Android 12 streamed from your own ARM server · setup script included</span>
+            </button>
             <button class="sample" data-sample="mikeos">
               <b>MikeOS 4.5</b><span>Floppy · a small OS with apps, BASIC, games and a DOOM launcher</span>
             </button>
@@ -366,7 +387,7 @@
               <b>Hello boot sector</b><span>Boot sector · ConMon Lab's own 16-bit demo</span>
             </button>
           </div>
-          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), Nano-X (MPL-1.1), ReactOS (GPL, downloaded by you), MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
+          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), Nano-X (MPL-1.1), ReactOS (GPL, downloaded by you), Redroid (Apache-2.0) and ws-scrcpy (MIT) on your server, MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
         </div>
 
         <div class="panel" id="pkg-panel">

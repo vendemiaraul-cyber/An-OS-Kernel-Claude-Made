@@ -682,6 +682,20 @@ void doom_controls() {
           "  F12 goes back to ConMon. On a phone, use the DOOM pad under the screen.\n");
 }
 
+// apple: facts the ConMon XNU iPhone app read from the phone's XNU kernel.
+// android: opens the window that links to Android on your own server.
+void cmd_apple(Shell &sh, const Args &) {
+    if (!host_available()) { no_host(); return; }
+    host_job(sh, "apple.info", "");
+}
+
+void cmd_android(Shell &sh, const Args &) {
+    if (!host_available()) { no_host(); return; }
+    if (host_job(sh, "window.android", ""))
+        print("Opened the Android window in ConMon Lab: real Android 12 runs on your\n"
+              "own server (android-server/ in the repo) and streams to the browser.\n");
+}
+
 // ---------------------------------------------------------------- install
 
 void cmd_install(Shell &sh, const Args &a) {
@@ -781,6 +795,8 @@ void cmd_install(Shell &sh, const Args &a) {
 
 void packages_register(Shell &sh) {
     sh.add(new FnCommand("install", "install <package>", "install llm, solMeteo, doom, doomy or native doom", cmd_install));
+    sh.add(new FnCommand("apple", "apple", "iPhone kernel (XNU) info from the ConMon XNU app", cmd_apple));
+    sh.add(new FnCommand("android", "android", "open Android running on your own server", cmd_android));
 }
 
 // Handles messages the host sends on its own while the shell waits for input.

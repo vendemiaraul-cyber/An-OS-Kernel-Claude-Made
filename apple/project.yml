@@ -1,0 +1,28 @@
+# XcodeGen spec: `xcodegen` turns this into ConMonXNU.xcodeproj (the GitHub
+# workflow in .github/workflows/ios.yml does it on a Mac build server).
+name: ConMonXNU
+options:
+  bundleIdPrefix: lab.conmon
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  ConMonXNU:
+    type: application
+    platform: iOS
+    sources: [ConMonXNU]
+    scheme: {}
+    info:
+      path: ConMonXNU/Info.plist
+      properties:
+        CFBundleDisplayName: ConMon XNU
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lab.conmon.xnu
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGNING_ALLOWED: NO

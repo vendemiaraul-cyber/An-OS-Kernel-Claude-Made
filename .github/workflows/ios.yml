@@ -1,0 +1,32 @@
+# Builds the ConMon XNU iPhone app (apple/) on a GitHub macOS runner.
+# The result is an unsigned .ipa; sign and install it with Sideloadly.
+name: iOS app (ConMon XNU)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["apple/**", ".github/workflows/ios.yml"]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apple && xcodegen generate
+      - name: Build (unsigned)
+        run: |
+          cd apple
+          xcodebuild -project ConMonXNU.xcodeproj -scheme ConMonXNU -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package the .ipa
+        run: |
+          cd apple
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/ConMonXNU.app Payload/
+          zip -qr ConMonXNU.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ConMonXNU-unsigned
+          path: apple/ConMonXNU.ipa

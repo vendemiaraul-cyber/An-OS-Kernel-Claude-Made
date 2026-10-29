@@ -378,7 +378,7 @@
     if (emulator) ui.fit.focus({ preventScroll: true });
   }
 
-  host.onWindow((what) => { if (what === "doom") openDoomWindow(); });
+  host.onWindow((what) => { if (what === "doom") openDoomWindow(); else if (what === "android") openAndroid(); });
 
   // Phones: a second AI model needs a fresh page. Offer a reload that comes
   // back with llm already installed.
@@ -647,15 +647,56 @@
   });
   ui.bootOverlay.addEventListener("click", boot);
   ui.url.addEventListener("input", () => { if (ui.url.value.trim()) markSample(null); });
+  // The ConMon XNU iPhone app opens /kernel/#xnu=<base64url JSON>. The part
+  // after # never reaches the server; keep it on this device for `apple`.
+  function takeXnu() {
+    const m = /[#&]xnu=([A-Za-z0-9_-]+)/.exec(location.hash);
+    if (!m) return;
+    try {
+      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      const bytes = Uint8Array.from(atob(b64 + "===".slice((b64.length + 3) % 4)), (c) => c.charCodeAt(0));
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (!data || typeof data.facts !== "object") throw new Error("bad");
+      data.received = new Date().toISOString();
+      localStorage.setItem("conmon.xnu", JSON.stringify(data));
+      setTimeout(() => setStatus("iPhone kernel info received · boot ConMon and type apple", "ok"), 300);
+    } catch { setTimeout(() => setStatus("That iPhone link was damaged; tap Show in ConMon Lab again.", "err"), 300); }
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+  takeXnu();
+  window.addEventListener("hashchange", takeXnu);   // Kernel Lab was already open
+
   function markSample(name) {
     for (const b of ui.samples.querySelectorAll(".sample")) b.classList.toggle("active", b.dataset.sample === name);
   }
+  // Android runs on the person's own server (android-server/setup.sh); the
+  // page only remembers its address and opens it. Its login page can't sit
+  // inside an iframe on most phones, so it opens in a new tab.
+  const droid = { win: $("android-window"), url: $("android-url"), open: $("android-open"), status: $("android-status") };
+  function openAndroid() {
+    try { droid.url.value = localStorage.getItem("conmon.androidUrl") || ""; } catch {}
+    droid.status.textContent = "";
+    droid.win.hidden = false;
+  }
+  $("android-close").addEventListener("click", () => { droid.win.hidden = true; });
+  droid.open.addEventListener("click", () => {
+    let u = droid.url.value.trim();
+    if (u && !/^https?:\/\//i.test(u)) u = "https://" + u;
+    let ok = false;
+    try { ok = /^https?:$/.test(new URL(u).protocol); } catch {}
+    if (!ok) { droid.status.textContent = "Paste the https:// address your server printed."; return; }
+    try { localStorage.setItem("conmon.androidUrl", u); } catch {}
+    window.open(u, "_blank", "noopener");
+    droid.status.textContent = "Opened in a new tab. Tap the device, then a player (MSE is smoothest).";
+  });
+
   // ReactOS can't be bundled from here, so the page walks you through
   // downloading it once and then boots the CD image from your device.
   const byo = { win: $("byo-window"), close: $("byo-close"), pick: $("byo-pick"), file: $("byo-file"), status: $("byo-status") };
   ui.samples.addEventListener("click", (e) => {
     const b = e.target.closest("[data-sample]");
     if (!b) return;
+    if (b.dataset.sample === "android") { openAndroid(); return; }
     if (b.dataset.sample === "reactos") {
       byo.status.textContent = "";
       byo.win.hidden = false;

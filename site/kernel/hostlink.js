@@ -199,6 +199,8 @@
         case "game.ack": game.acked = true; break;
         // A guest OS (MikeOS's DOOM.BAS) asks the page to open a window.
         case "window.doom": if (onWindow) onWindow("doom"); break;
+        case "window.android": if (onWindow) onWindow("android"); send("D", ""); break;
+        case "apple.info": appleInfo(); break;
         case "meteo.stop": meteoRun++; setBusy(""); break;
         default: break;
       }
@@ -983,6 +985,32 @@
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
+  }
+
+  // Facts the ConMon XNU iPhone app read from the phone's own kernel.
+  function appleInfo() {
+    let data = null;
+    try { data = JSON.parse(localStorage.getItem("conmon.xnu") || "null"); } catch {}
+    if (!data || !data.facts) {
+      for (const l of [
+        "No iPhone kernel info yet. On the iPhone:",
+        "  1. Install the ConMon XNU app (apple/ in the GitHub repo; Sideloadly).",
+        "  2. Open it and tap Show in ConMon Lab. This page opens with the info.",
+        "  3. Boot ConMon and type apple again.",
+      ]) sendText("M", l);
+      send("D", "");
+      return;
+    }
+    const keys = Array.isArray(data.order) ? data.order.filter((k) => k in data.facts) : Object.keys(data.facts);
+    const w = Math.min(18, Math.max(...keys.map((k) => k.length)));
+    sendText("M", "Apple XNU kernel, read on the iPhone by the ConMon XNU app:");
+    for (const k of keys) {
+      const v = String(data.facts[k]).replace(/[\x00-\x1f]/g, " ");
+      const lines = (k.padEnd(w) + "  " + v).match(/.{1,76}/g) || [];
+      lines.forEach((l, i) => sendText("M", (i ? " ".repeat(w + 4) : "  ") + l.trimStart()));
+    }
+    if (data.received) sendText("M", "  (received " + data.received.slice(0, 16).replace("T", " ") + " UTC)");
+    send("D", "");
   }
 
   async function modelInfo(target) {
