@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kernel Lab · ConMon</title>
+  <meta name="description" content="Boot ConMon or your own x86 kernel in the browser with the v86 emulator.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2313171c'/%3E%3Crect x='3' y='3' width='6' height='6' rx='1' fill='%234ade80'/%3E%3C/svg%3E">
+  <style>
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; margin: 20px 0; }
+    @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+    .monitor { background: #050607; border: 1px solid var(--line); border-radius: 14px; padding: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.02); }
+    .monitor-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .monitor-bar .btn { padding: 6px 10px; font-size: 13px; }
+    .monitor-bar .name { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; flex: 1 1 140px; min-width: 0; }
+    .screen-fit { position: relative; background: #000; border-radius: 6px; overflow: hidden; min-height: 200px; cursor: text; }
+    .screen-fit:focus-within, .screen-fit.focused { outline: 1px solid rgba(74,222,128,.35); }
+    #screen { transform-origin: top left; display: inline-block; }
+    #screen > div { white-space: pre; font: 14px/14px var(--mono); color: #c0c0c0; }
+    #screen canvas { display: block; image-rendering: pixelated; }
+    .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 20px; background: radial-gradient(ellipse at center, #0d1410 0%, #000 70%); }
+    .overlay .big { font-family: var(--mono); font-size: 22px; color: var(--accent); text-shadow: 0 0 12px rgba(74,222,128,.6); }
+    .progress { width: min(320px, 80%); height: 4px; background: #111; border-radius: 4px; overflow: hidden; }
+    .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+
+    .typebar { display: flex; gap: 8px; margin-top: 10px; }
+    .typebar .field { flex: 1; font-family: var(--mono); font-size: 14px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+    .drop { display: block; border: 1.5px dashed var(--line); border-radius: 10px; padding: 18px 12px; text-align: center; color: var(--muted); font-size: 14px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .drop.over, .drop:hover { border-color: var(--accent); background: rgba(74,222,128,.04); color: var(--text); }
+    .drop strong { color: var(--text); }
+    .side { display: flex; flex-direction: column; gap: 16px; }
+    .side .panel > * + * { margin-top: 12px; }
+    .file-info { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+
+    .serial { background: #050607; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 12px/1.45 var(--mono); color: #b8f5c9; height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .samples { display: flex; flex-direction: column; gap: 8px; }
+    .sample { text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; color: var(--text); }
+    .sample:hover { border-color: #3a4450; }
+    .sample.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .sample b { display: block; font-size: 15px; }
+    .sample span { display: block; color: var(--muted); font-size: 12px; font-family: var(--mono); margin-top: 2px; }
+    .tips li { margin: 6px 0; }
+    .tips { padding-left: 18px; margin: 0; color: var(--muted); font-size: 14px; }
+    .tips b { color: var(--text); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/"><span class="dot"></span>ConMon<span class="full">&nbsp;Lab</span></a>
+      <nav class="nav">
+        <a href="/kernel/" class="active">Kernel Lab</a>
+        <a href="/youtube/">YouTube Test</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section style="margin-top:28px">
+      <h1>Kernel Lab</h1>
+      <p class="lead">A real x86 PC emulated in your browser. ConMon boots by default; drop in your own Multiboot kernel, floppy, ISO or disk image to try it.</p>
+    </section>
+
+    <div class="layout">
+      <!-- emulator -->
+      <section>
+        <div class="monitor">
+          <div class="monitor-bar">
+            <span id="status" class="badge"><span class="led"></span><span id="status-text">idle</span></span>
+            <span id="current-name" class="name"></span>
+            <button class="btn" id="btn-pause" disabled>Pause</button>
+            <button class="btn" id="btn-restart" disabled>Restart</button>
+            <button class="btn" id="btn-cad" disabled title="Send Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+            <button class="btn" id="btn-full" disabled>Fullscreen</button>
+          </div>
+
+          <div class="screen-fit" id="screen-fit" tabindex="0" aria-label="Emulator screen. Click, then type.">
+            <div id="screen"></div>
+            <div class="overlay" id="overlay">
+              <div class="big">&gt; ConMon_</div>
+              <div class="muted small" id="overlay-text">Press Boot to start the emulator.</div>
+              <div class="progress hidden" id="progress"><div></div></div>
+              <button class="btn primary" id="btn-boot-overlay">Boot</button>
+            </div>
+          </div>
+
+          <form class="typebar" id="typebar" autocomplete="off">
+            <input class="field" id="type-input" placeholder="Type a command and press Send (handy on phones)" enterkeyhint="send" autocapitalize="off" spellcheck="false">
+            <button class="btn primary" type="submit">Send</button>
+          </form>
+          <div class="chips" id="chips" aria-label="ConMon commands">
+            <button class="chip" data-cmd="help">help</button>
+            <button class="chip" data-cmd="calc (2+3)*7">calc (2+3)*7</button>
+            <button class="chip" data-cmd="ls">ls</button>
+            <button class="chip" data-cmd="cat readme.txt">cat readme.txt</button>
+            <button class="chip" data-cmd="write notes.txt Hello from the browser">write notes.txt …</button>
+            <button class="chip" data-cmd="mem">mem</button>
+            <button class="chip" data-cmd="uptime">uptime</button>
+            <button class="chip" data-cmd="guess">guess</button>
+            <button class="chip" data-cmd="crash">crash</button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="row" style="margin-bottom:10px">
+            <h2 style="margin:0">Serial console <span class="muted small mono">COM1</span></h2>
+            <span style="flex:1"></span>
+            <button class="btn" id="btn-serial-clear">Clear</button>
+          </div>
+          <pre class="serial" id="serial"></pre>
+        </div>
+      </section>
+
+      <!-- controls -->
+      <aside class="side">
+        <div class="panel">
+          <h2>Bundled kernels</h2>
+          <div class="samples" id="samples">
+            <button class="sample active" data-sample="conmon">
+              <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 39 KB</span>
+            </button>
+            <button class="sample" data-sample="hello">
+              <b>Hello boot sector</b><span>Floppy · 512 bytes of 16-bit real mode</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Load your own</h2>
+          <label class="drop" id="drop">
+            <input type="file" id="file" hidden accept=".bin,.elf,.kernel,.img,.ima,.flp,.iso,.hdd,.raw,.vfd">
+            <div><strong>Choose a file</strong> or drop it here</div>
+            <div class="small" style="margin-top:4px">.bin / .elf · .img · .iso</div>
+          </label>
+          <div class="file-info" id="file-info">No file chosen.</div>
+
+          <div>
+            <label class="lbl" for="url">…or load from a URL</label>
+            <input class="field" id="url" style="width:100%" placeholder="https://example.com/kernel.bin" inputmode="url">
+            <div class="muted small" style="margin-top:4px">The server must allow cross-origin downloads (CORS).</div>
+          </div>
+
+          <div class="row">
+            <div class="grow">
+              <label class="lbl" for="kind">Boot as</label>
+              <select class="field" id="kind" style="width:100%">
+                <option value="auto">Auto-detect</option>
+                <option value="multiboot">Multiboot kernel</option>
+                <option value="fda">Floppy image</option>
+                <option value="cdrom">CD-ROM (ISO)</option>
+                <option value="hda">Hard disk image</option>
+              </select>
+            </div>
+            <div style="width:110px">
+              <label class="lbl" for="ram">RAM</label>
+              <select class="field" id="ram" style="width:100%">
+                <option value="32">32 MB</option>
+                <option value="64" selected>64 MB</option>
+                <option value="128">128 MB</option>
+                <option value="256">256 MB</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="btn primary" id="btn-boot" style="width:100%">Boot this file</button>
+        </div>
+
+        <div class="panel">
+          <h2>What boots here?</h2>
+          <ul class="tips">
+            <li><b>Multiboot v1 kernels</b> (ELF), like ConMon or most tutorial kernels built with GRUB's <span class="mono">multiboot</span> header. Multiboot2-only kernels won't start.</li>
+            <li><b>Floppy images</b> (≤ 2.88 MB): FreeDOS, KolibriOS, bootsector games.</li>
+            <li><b>ISOs and disk images</b>: small Linux distros, BSDs, old Windows. Large images take a while since they load into memory.</li>
+            <li>32-bit x86 only: no 64-bit long mode.</li>
+          </ul>
+          <p class="muted small" style="margin:0">Emulation by <a href="https://github.com/copy/v86" target="_blank" rel="noopener">v86</a> (BSD-2) with SeaBIOS (LGPL). Files you load never leave your browser.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="wrap footer">ConMon Lab · <a href="/">home</a></footer>
+
+  <script src="/v86/libv86.js"></script>
+  <script src="/kernel/kernel.js"></script>
+</body>
+</html>

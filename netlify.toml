@@ -1,0 +1,23 @@
+# ConMon Lab - Netlify configuration
+[build]
+  publish = "site"
+
+[functions]
+  directory = "netlify/functions"
+
+# Emulator files are large and never change between deploys of the same version.
+[[headers]]
+  for = "/v86/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/v86/v86.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

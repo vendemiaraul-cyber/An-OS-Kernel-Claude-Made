@@ -1,0 +1,6 @@
+node_modules/
+.netlify/
+.env
+os/build/
+os/conmon.iso
+.DS_Store
