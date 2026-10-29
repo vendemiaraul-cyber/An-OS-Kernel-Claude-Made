@@ -116,14 +116,14 @@
     return u[0] === 0x48 && u[1] === 0x64 && u[2] === 0x72 && u[3] === 0x53;
   }
 
-  function detectKind(name, buf) {
+  function detectKind(name, buf, size = buf.byteLength) {
     const ext = (name.split(".").pop() || "").toLowerCase();
     if (isIso(buf) || ext === "iso") return "cdrom";
     const mb = hasMultibootHeader(buf);
     if (mb === 1) return "multiboot";
     if (mb === 2) throw new Error("This is a Multiboot2 kernel. v86 only boots Multiboot v1 kernels directly; wrap it in a GRUB ISO instead.");
     if (isBzImage(buf)) return "bzimage";
-    if (buf.byteLength <= FLOPPY_MAX) return "fda";
+    if (size <= FLOPPY_MAX) return "fda";
     return "hda";
   }
 
@@ -380,6 +380,21 @@
 
   host.onWindow((what) => { if (what === "doom") openDoomWindow(); });
 
+  // Phones: a second AI model needs a fresh page. Offer a reload that comes
+  // back with llm already installed.
+  host.onReloadNeeded(() => {
+    if ($("reload-bar")) return;
+    const bar = document.createElement("button");
+    bar.id = "reload-bar";
+    bar.className = "taskbar";
+    bar.textContent = "Tap to reload the page and load another AI model";
+    bar.addEventListener("click", () => {
+      try { sessionStorage.setItem("conmon.resume", "llm"); } catch (_) {}
+      location.reload();
+    });
+    ui.monitor.prepend(bar);
+  });
+
   // ------------------------------------------------------ AI file preview
   const pv = { win: $("preview-window"), name: $("preview-name"), tabs: $("preview-tabs"), frame: $("preview-frame"),
     code: $("preview-code"), mode: $("preview-mode"), download: $("preview-download"), close: $("preview-close") };
@@ -547,11 +562,12 @@
       const src = await loadSource();
       ui.chips.classList.toggle("hidden", src.bundled !== "conmon");
       let kind = ui.kind.value;
-      if (kind === "auto") kind = detectKind(src.name, src.buffer);
+      const size = src.size || src.buffer.byteLength;
+      if (kind === "auto") kind = detectKind(src.name, src.buffer, size);
       ui.pkgPanel.classList.toggle("hidden", src.bundled !== "conmon" && kind !== "multiboot");
-      if (kind === "fda" && src.buffer.byteLength > FLOPPY_MAX)
+      if (kind === "fda" && size > FLOPPY_MAX)
         throw new Error("That image is bigger than a 2.88 MB floppy. Boot it as a hard disk instead.");
-      if (kind === "fda" && src.buffer.byteLength < 1474560) {   // boot sectors -> a full 1.44 MB floppy
+      if (kind === "fda" && !src.file && src.buffer.byteLength < 1474560) {   // boot sectors -> a full 1.44 MB floppy
         const padded = new Uint8Array(1474560);
         padded.set(new Uint8Array(src.buffer));
         src.buffer = padded.buffer;
@@ -561,7 +577,7 @@
       ui.hint.hidden = !ui.hint.textContent;
       ui.keys.dataset.mode = src.bundled === "conmon" ? "conmon" : "guest";
 
-      ui.name.textContent = `${src.name} · ${KIND_LABEL[kind]} · ${formatSize(src.buffer.byteLength)}`;
+      ui.name.textContent = `${src.name} · ${KIND_LABEL[kind]} · ${formatSize(size)}`;
       setStatus("starting", "warn");
       showOverlay("Starting the virtual PC…", false);
 
@@ -573,7 +589,8 @@
         vga_memory_size: 8 * 1024 * 1024,
         autostart: true,
       };
-      options[kind] = { buffer: src.buffer };
+      // Big files (a ReactOS CD, say) are read from disk as needed, not all at once.
+      options[kind] = src.file ? { buffer: src.file, async: true } : { buffer: src.buffer };
       if (kind === "cdrom") options.boot_order = 0x123;     // CD first
       if (kind === "hda") options.boot_order = 0x132;       // hard disk first
       if (kind === "fda") options.boot_order = 0x321;       // floppy first
@@ -599,6 +616,10 @@
         setRunningControls(true);
         ui.fit.focus({ preventScroll: true });
         setTimeout(fitScreen, 50);
+        // Back from a "reload to load another model": reinstall llm for you.
+        let resume = "";
+        try { resume = sessionStorage.getItem("conmon.resume") || ""; sessionStorage.removeItem("conmon.resume"); } catch (_) {}
+        if (resume === "llm" && src.bundled === "conmon") setTimeout(() => { if (emulator === emu) sendText("install llm\n"); }, 3500);
       });
       emu.add_listener("emulator-stopped", () => {
         if (emulator === emu) { setStatus("paused", "warn"); ui.pause.textContent = "Resume"; }
@@ -629,9 +650,17 @@
   function markSample(name) {
     for (const b of ui.samples.querySelectorAll(".sample")) b.classList.toggle("active", b.dataset.sample === name);
   }
+  // ReactOS can't be bundled from here, so the page walks you through
+  // downloading it once and then boots the CD image from your device.
+  const byo = { win: $("byo-window"), close: $("byo-close"), pick: $("byo-pick"), file: $("byo-file"), status: $("byo-status") };
   ui.samples.addEventListener("click", (e) => {
     const b = e.target.closest("[data-sample]");
     if (!b) return;
+    if (b.dataset.sample === "reactos") {
+      byo.status.textContent = "";
+      byo.win.hidden = false;
+      return;
+    }
     sample = b.dataset.sample;
     selected = null;
     ui.url.value = "";
@@ -663,19 +692,39 @@
   });
   document.addEventListener("fullscreenchange", () => setTimeout(fitScreen, 100));
 
-  function pickFile(file) {
+  function pickFile(file, then) {
     if (!file) return;
     ui.fileInfo.textContent = "Reading " + file.name + "…";
-    file.arrayBuffer().then((buffer) => {
-      selected = { name: file.name, buffer };
+    const big = file.size > 24 * 1024 * 1024;
+    (big ? file.slice(0, 64 * 1024).arrayBuffer() : file.arrayBuffer()).then((buffer) => {
+      selected = big ? { name: file.name, buffer, file, size: file.size } : { name: file.name, buffer };
       ui.url.value = "";
       markSample(null);
       let guess = "";
-      try { guess = KIND_LABEL[detectKind(file.name, buffer)]; } catch (e) { guess = "unsupported: " + e.message; }
+      try { guess = KIND_LABEL[detectKind(file.name, buffer, file.size)]; } catch (e) { guess = "unsupported: " + e.message; }
       ui.fileInfo.textContent = `${file.name} · ${formatSize(file.size)} · looks like: ${guess}`;
+      if (then) then(guess);
     });
   }
   ui.file.addEventListener("change", () => pickFile(ui.file.files[0]));
+  byo.close.addEventListener("click", () => { byo.win.hidden = true; });
+  byo.pick.addEventListener("click", () => byo.file.click());
+  byo.file.addEventListener("change", () => {
+    const f = byo.file.files[0];
+    if (!f) return;
+    if (/\.zip$/i.test(f.name)) { byo.status.textContent = "That's the zip. Unzip it first (tap it in Files), then pick the .iso inside."; return; }
+    byo.status.textContent = "Reading " + f.name + "…";
+    pickFile(f, (guess) => {
+      if (guess !== "CD-ROM") { byo.status.textContent = "That doesn't look like a CD image (.iso). Pick the ReactOS .iso file."; return; }
+      if (parseInt(ui.ram.value, 10) < 256) ui.ram.value = "256";
+      ui.kind.value = "cdrom";
+      byo.win.hidden = true;
+      markSample("reactos");
+      ui.hint.textContent = "ReactOS: the first boot takes a few minutes. Choose \"Live CD\" to try it without installing. Click the screen to use the mouse.";
+      ui.hint.hidden = false;
+      boot();
+    });
+  });
   ["dragenter", "dragover"].forEach((t) => ui.drop.addEventListener(t, (e) => { e.preventDefault(); ui.drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach((t) => ui.drop.addEventListener(t, (e) => { e.preventDefault(); ui.drop.classList.remove("over"); }));
   ui.drop.addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));

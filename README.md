@@ -19,7 +19,10 @@ A Netlify site with two apps:
   the Nano-X (Microwindows) windowing desktop, its window manager and apps
   (terminal, calculator, clock, Tetris, landmine, chess, world map, DOOM),
   with a mouse that follows your pointer or finger (2.5 MB). There is also
-  a text-only **Linux 6.6 (shell)** with BusyBox (1.5 MB), MikeOS, Tetros, bootBASIC, bootOS and
+  a text-only **Linux 6.6 (shell)** with BusyBox (1.5 MB),
+  **ReactOS (Windows-like)** (real Windows is Microsoft's paid software and
+  can't be bundled, so this entry walks you through downloading the free,
+  open-source ReactOS CD from reactos.org and boots it from your device), MikeOS, Tetros, bootBASIC, bootOS and
   SectorLISP on the main screen. You can drop in your own bzImage too. MikeOS has a `DOOM.BAS` program at the top
   of its menu: it can't run DOOM itself (it's 16-bit), so it asks the page,
   over the serial port, to open DOOM in a window.
@@ -69,6 +72,9 @@ Ollama set `OLLAMA_ORIGINS=http://localhost:8080`.
 
 - ConMon now gives up with a message instead of freezing when the page
   stops answering, and Ctrl+C (or Esc) cancels a download that is stuck.
+- On phones, a second model (or a retry after a failed load) needs a fresh
+  page, because the browser never gives that memory back; the page shows a
+  Reload button that comes back with llm installed.
 - Only one model sits in memory at a time; `install llm all` downloads each
   model and frees it before the next one.
 - "Not enough browser storage": each model is kept in the browser's cache.

@@ -129,6 +129,9 @@
     .doom-screen canvas { width: 100%; height: auto; aspect-ratio: 8 / 5; image-rendering: auto; }
     .doom-pad { padding: 0 12px 12px; }
     @media (max-width: 720px) { .doom-window { display: flex; } .doom-window[hidden] { display: none; } }
+    .byo-window { width: min(560px, calc(100% - 36px)); }
+    .byo-body { padding: 10px 14px 14px; font-size: 14px; line-height: 1.5; }
+    .byo-body ol { padding-left: 20px; margin: 8px 0 12px; }
     .haiku-key { display: flex; gap: 6px; }
     .haiku-key .field { flex: 1; min-width: 0; font-family: var(--mono); }
     .screen-hint { margin: 8px 0 0; font-size: 13px; color: #a7f3c0; }
@@ -227,6 +230,26 @@
               <button data-sc="58" class="pad-quit">QUIT</button>
             </div>
           </div>
+          <!-- ReactOS: bring your own CD image -->
+          <div class="vm-window byo-window" id="byo-window" hidden role="dialog" aria-label="Boot ReactOS">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">ReactOS · a free, open-source Windows-like OS</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="byo-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p>Real Windows is Microsoft's paid software, so it can't be included. ReactOS is built to look and run like Windows (Start menu, Explorer, many Windows programs) and is free.</p>
+              <ol>
+                <li>Download the ReactOS CD (about 100 MB) from <a href="https://reactos.org/download/" target="_blank" rel="noopener">reactos.org/download</a>.</li>
+                <li>Unzip it. On an iPhone: open the Files app and tap the zip.</li>
+                <li>Tap the button below and pick the <span class="mono">.iso</span> file.</li>
+              </ol>
+              <button class="btn primary" id="byo-pick" type="button">Choose the ReactOS .iso</button>
+              <input type="file" id="byo-file" hidden accept=".iso,application/x-iso9660-image,application/octet-stream">
+              <p class="small muted" id="byo-status"></p>
+              <p class="small muted">It runs with 256 MB of RAM and takes a few minutes to start. On a phone it is slow; a computer works best.</p>
+            </div>
+          </div>
           <!-- Files an AI wrote, shown live -->
           <div class="vm-window preview-window" id="preview-window" hidden role="dialog" aria-label="File preview">
             <div class="vm-title">
@@ -321,6 +344,9 @@
             <button class="sample" data-sample="linux">
               <b>Linux 6.6 (shell)</b><span>bzImage · Linux with a BusyBox text shell · 1.5 MB</span>
             </button>
+            <button class="sample" data-sample="reactos">
+              <b>ReactOS (Windows-like)</b><span>CD image · open-source Windows look-alike with a desktop · bring the .iso</span>
+            </button>
             <button class="sample" data-sample="mikeos">
               <b>MikeOS 4.5</b><span>Floppy · a small OS with apps, BASIC, games and a DOOM launcher</span>
             </button>
@@ -340,7 +366,7 @@
               <b>Hello boot sector</b><span>Boot sector · ConMon Lab's own 16-bit demo</span>
             </button>
           </div>
-          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), Nano-X (MPL-1.1), MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
+          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), Nano-X (MPL-1.1), ReactOS (GPL, downloaded by you), MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
         </div>
 
         <div class="panel" id="pkg-panel">
@@ -408,6 +434,7 @@
                 <option value="64" selected>64 MB</option>
                 <option value="128">128 MB</option>
                 <option value="256">256 MB</option>
+                <option value="512">512 MB</option>
               </select>
             </div>
           </div>

@@ -56,7 +56,12 @@
       "When asked for code or a file, write the complete code in a fenced block whose first line names the language and a file name, like ```html index.html",
     ].join(" ");
   }
-  const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+  const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ||
+    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);     // iPadOS says "Macintosh"
+  // On phones a browser model's memory is never fully given back (WebAssembly
+  // memory can't shrink), so a second load in the same page can crash the tab.
+  let phoneModelLoaded = "", phoneLoadFailed = false;
+  let onReloadNeeded = null;
   let emu = null;
   let onState = () => {};
   let onWindow = null;
@@ -340,7 +345,7 @@
     const mobile = MOBILE;
     const mem = navigator.deviceMemory || 8;          // browsers report at most 8
     // Stay well under the machine's memory: the model, its cache and the page share it.
-    const budgetMB = mobile ? 1000 : mem <= 2 ? 900 : mem <= 4 ? 1800 : 3500;
+    const budgetMB = mobile ? 700 : mem <= 2 ? 900 : mem <= 4 ? 1800 : 3500;
     const byId = new Map(webllm.prebuiltAppConfig.model_list.map((m) => [m.model_id, m]));
     const out = [];
     for (const [family, label] of FAMILIES) {
@@ -477,11 +482,22 @@
       if (free !== null && needMB && free < needMB * 1.1)
         throw new Error(`Not enough browser storage: ${mbText(free)} free, ${listed.label} needs about ${listed.size}.`);
     }
+    if (MOBILE && (name === "tfjs" || name === "webllm")) {
+      if (opts.fetchOnly) throw new Error("On a phone, download one model at a time: type models and pick one.");
+      if (phoneModelLoaded && (phoneModelLoaded !== id || phoneLoadFailed)) {
+        if (onReloadNeeded) onReloadNeeded();
+        throw new Error(phoneLoadFailed
+          ? "The last try still holds the phone's memory, so trying again here would crash. Tap Reload on the page, then try once more."
+          : "On a phone, a second model in the same page can crash the browser. Tap Reload on the page (or reload it), then load this model.");
+      }
+      phoneModelLoaded = id;               // set before loading: a failed load still holds memory
+    }
     if (name === "tfjs" || name === "webllm") await freeEngines(name);
     loading = name;
     try {
       await loadEngine(id, name, model);
     } catch (err) {
+      if (MOBILE && !cancelled) { phoneLoadFailed = true; if (onReloadNeeded) onReloadNeeded(); }
       if (name === "webllm") { try { await engine.unload(); } catch (_) {} engine = null; }
       if (name === "tfjs") tfjsPipe = null;
       if (state.model === id) state.model = null;
@@ -1761,6 +1777,7 @@
     onStateChange(fn) { onState = fn; fn(state); },
     onWindow(fn) { onWindow = fn; },
     onPreview(fn) { onPreview = fn; },
+    onReloadNeeded(fn) { onReloadNeeded = fn; },
     haikuKeyChanged() { haikuReady = null; },
     get state() { return state; },
     // test hooks: let automated tests swap in fake engines
