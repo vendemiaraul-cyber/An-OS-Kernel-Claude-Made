@@ -40,14 +40,27 @@
     ["Phi-3.5-mini-instruct", "Phi 3.5 mini"],
     ["Qwen3-4B", "Qwen3 4B (best answers)"],
   ];
-  const SYSTEM_PROMPT =
-    "You are a helpful assistant running inside ConMon, a tiny hobby operating system " +
-    "shown on an 80-column text screen. Answer in plain text without markdown, " +
-    "tables or emoji. Keep answers short unless asked for detail.";
+  // Every model is told who really made it, so it never claims ConMon did:
+  // ConMon only runs the model and shows its words on screen.
+  function systemPromptFor(id) {
+    const { name } = engineOf(id);
+    const m = lastModels.find((x) => x.id === id) || { id, label: engineOf(id).model };
+    const maker = catalogFor(m).maker;
+    const where = name === "ollama" ? "with Ollama on the user's own PC" : "in the user's web browser";
+    return [
+      `You are ${m.label}, a language model made by ${maker || "your original developer"}.`,
+      `You are running ${where} and chatting through ConMon, a tiny hobby operating system shown on an 80-column text screen.`,
+      `ConMon and ConMon Lab did not make, train or fine-tune you; they only display your answers.`,
+      maker ? `If asked who made or trained you, say ${maker}.` : "If asked who made or trained you, name your real developer, never ConMon.",
+      "Answer in plain text without markdown tables or emoji, and keep answers short unless asked for detail.",
+      "When asked for code or a file, write the complete code in a fenced block whose first line names the language and a file name, like ```html index.html",
+    ].join(" ");
+  }
   const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
   let emu = null;
   let onState = () => {};
   let onWindow = null;
+  let onPreview = null;
   const state = { meteo: false, llm: false, doom: false, doomy: false, nativedoom: false, game: "", gpu: "unknown", model: null, modelLabel: "", busy: "" };
 
   // ------------------------------------------------------------ framing
@@ -166,6 +179,7 @@
         case "llm.fetch": await loadModel(arg, { fetchOnly: true }); break;
         case "llm.chat": await chat(arg); break;
         case "llm.stop": stopGeneration(); break;
+        case "llm.haiku": await setHaiku(arg); break;
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
         case "llm.info": await modelInfo(arg); break;
         case "meteo.show": await showMeteo(arg); break;
@@ -362,8 +376,8 @@
     const adapter = await gpuAdapter();
     const groups = [];
 
-    groups.push({ engine: "SmartestChild - built-in retro chatbot, instant", models: [
-      { id: "smartest:child", label: "SmartestChild", size: "built in", status: "ready" },
+    groups.push({ engine: "SmartestChild - scripted retro chatbot (rules, no AI model)", models: [
+      { id: "smartest:child", label: "SmartestChild (scripted)", size: "built in", status: "ready" },
     ] });
     if (PREVIEW) {
       notes.push("Preview: only SmartestChild runs here. The other engines need internet.");
@@ -486,6 +500,9 @@
     state.model = id;
     state.modelLabel = labelFor(id);
     history = [];
+    const m = lastModels.find((x) => x.id === id) || { id, label: labelFor(id) };
+    const maker = catalogFor(m).maker;
+    if (name !== "smartest") sendText("M", `${labelFor(id)}: made by ${maker || "its original developer"}, run here by ${ENGINE_NAME[name] || name}.`);
     setBusy("");
     send("D", "");
   }
@@ -584,7 +601,7 @@
     const { name, model } = engineOf(state.model);
     history.push({ role: "user", content: text });
     if (history.length > 16) history = history.slice(-16);
-    const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+    const messages = [{ role: "system", content: systemPromptFor(state.model) }, ...history];
     setBusy("thinking");
     const out = makeStreamer();
 
@@ -606,13 +623,13 @@
       const msgs = /qwen3/i.test(model)
         ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, content: m.content + " /no_think" } : m))
         : messages;
-      const opts = { max_new_tokens: 384, do_sample: false, streamer };
+      const opts = { max_new_tokens: 768, do_sample: false, streamer };
       if (tfjsStopper) opts.stopping_criteria = tfjsStopper;
       await tfjsPipe(msgs, opts);
       tfjsStopper = null;
     } else if (name === "webllm") {
       if (!engine) throw new Error("The model isn't loaded. Type load to load it again.");
-      const request = { messages, stream: true, temperature: 0.7, max_tokens: 512 };
+      const request = { messages, stream: true, temperature: 0.7, max_tokens: 1024 };
       if (/^Qwen3/i.test(model)) request.extra_body = { enable_thinking: false };
       const stream = await engine.chat.completions.create(request);
       for await (const chunk of stream) {
@@ -661,8 +678,148 @@
 
     const reply = out.done();
     history.push({ role: "assistant", content: reply });
+    let final = reply;
+    if (haikuOn && !PREVIEW) {
+      const better = await haikuAdvance(text, reply);
+      if (better) final = better;
+    }
+    deliverFiles(final);
     setBusy("");
     send("X", "");
+  }
+
+  // ------------------------------------------------------ Haiku advancement
+  //
+  // After the local model answers, Claude Haiku 5.5 (Anthropic) checks the
+  // answer, fixes mistakes and writes better code. It runs through this
+  // site's /api/claude function (key on Netlify) or, failing that, straight
+  // from the browser with a key saved on this page.
+
+  const HAIKU_MODEL = "claude-haiku-5-5";
+  let haikuOn = true, haikuReady = null, haikuWarned = false;
+
+  function browserKey() { try { return localStorage.getItem("conmon.anthropicKey") || ""; } catch (_) { return ""; } }
+
+  async function haikuRoute() {
+    if (PREVIEW) return null;
+    if (haikuReady !== null) return haikuReady;
+    try {
+      const r = await fetch("/api/claude", { signal: AbortSignal.timeout(4000) });
+      const d = r.ok ? await r.json() : null;
+      if (d && d.ready) return (haikuReady = "site");
+    } catch (_) {}
+    return (haikuReady = browserKey() ? "browser" : false);
+  }
+
+  async function callHaiku(system, messages) {
+    const route = await haikuRoute();
+    if (!route) throw new Error("NOKEY");
+    if (route === "site") {
+      const r = await fetch("/api/claude", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ system, messages, max_tokens: 4096 }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Claude answered " + r.status);
+      return d.text || "";
+    }
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": browserKey(), "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: HAIKU_MODEL, max_tokens: 4096, system, messages }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((d.error && d.error.message) || "Claude answered " + r.status);
+    return (d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  }
+
+  async function haikuAdvance(question, draft) {
+    const m = lastModels.find((x) => x.id === state.model) || { id: state.model, label: labelFor(state.model) };
+    const maker = catalogFor(m).maker || "its developer";
+    const system = [
+      "You are Claude Haiku 5.5, made by Anthropic, working as the 'Haiku advancement' in ConMon Lab.",
+      `A small local model, ${m.label} (made by ${maker}), has just answered the user inside ConMon, a hobby OS with an 80-column text screen.`,
+      "Check that answer. Correct any mistakes, fill in what is missing and give the best complete answer.",
+      "If the draft is already right, confirm it in a sentence and add anything important.",
+      "Use plain text; no markdown headings, tables or emoji.",
+      "When code or a file is wanted, write complete, working code in fenced blocks whose first line is the language and a file name, like ```html index.html.",
+      "For a web page, put the HTML, CSS and JavaScript in one index.html unless the user asks for separate files.",
+    ].join(" ");
+    const past = history.slice(0, -2).slice(-10);
+    const messages = [...past, { role: "user", content: `${question}\n\n[Draft answer from ${m.label}]\n${draft || "(no answer)"}` }];
+    while (messages.length && messages[0].role !== "user") messages.shift();
+    try {
+      setBusy("Haiku advancement");
+      const better = (await callHaiku(system, messages)).trim();
+      if (!better) return null;
+      sendText("T", "\n\n[Haiku advancement - Claude Haiku 5.5 by Anthropic]\n");
+      for (let i = 0; i < better.length; i += 600) sendText("T", better.slice(i, i + 600));
+      return better;
+    } catch (err) {
+      if (err.message === "NOKEY") {
+        if (!haikuWarned) sendText("M", "Haiku advancement: add a Claude API key in the page's Packages panel (or ANTHROPIC_API_KEY on Netlify) to turn it on.");
+        haikuWarned = true;
+      } else {
+        sendText("M", "Haiku advancement failed: " + explain(err).slice(0, 120));
+      }
+      return null;
+    }
+  }
+
+  async function setHaiku(arg) {
+    const a = String(arg || "").toLowerCase();
+    if (a === "on") haikuOn = true;
+    else if (a === "off") haikuOn = false;
+    haikuReady = null;
+    const route = await haikuRoute();
+    const how = route === "site" ? "this site's key" : route === "browser" ? "the key saved on this page" : "no key yet (add one in the Packages panel)";
+    sendText("M", PREVIEW ? "Haiku advancement needs internet, so it is off in this preview."
+      : `Haiku advancement is ${haikuOn ? "ON" : "OFF"}: Claude Haiku 5.5 ${haikuOn ? "checks" : "won't check"} each answer. Using ${how}.`);
+  }
+
+  // ------------------------------------------------- files from an answer
+  //
+  // Code blocks in an answer become files: saved into ConMon's RAM disk
+  // (so ls and cat show them) and shown in the page's preview window.
+
+  const EXT = { html: "html", htm: "html", css: "css", javascript: "js", js: "js", typescript: "ts", ts: "ts", python: "py", py: "py",
+    c: "c", cpp: "cpp", "c++": "cpp", java: "java", rust: "rs", go: "go", sh: "sh", bash: "sh", json: "json", sql: "sql", svg: "svg",
+    markdown: "md", md: "md", xml: "xml", yaml: "yml", php: "php", ruby: "rb", lua: "lua", txt: "txt", text: "txt" };
+  const DEFAULT_NAME = { html: "index.html", css: "style.css", js: "script.js", py: "main.py", c: "main.c", cpp: "main.cpp", java: "Main.java",
+    rs: "main.rs", go: "main.go", sh: "run.sh", json: "data.json", svg: "image.svg" };
+
+  function extractFiles(text) {
+    const files = [], used = new Set();
+    const re = /```([^\n`]*)\n([\s\S]*?)```/g;
+    let m;
+    while ((m = re.exec(String(text || "")))) {
+      const info = m[1].trim().split(/\s+/).filter(Boolean);
+      let lang = (info[0] || "").toLowerCase(), name = info.find((w) => /\.[a-z0-9]+$/i.test(w)) || "";
+      if (/\.[a-z0-9]+$/i.test(lang) && !name) { name = lang; lang = lang.split(".").pop(); }
+      let body = m[2];
+      const first = body.split("\n")[0];
+      const fromComment = /^\s*(?:\/\/|#|<!--|\/\*)\s*(?:file(?:name)?:?\s*)?([\w.-]+\.[a-z0-9]+)\s*(?:-->|\*\/)?\s*$/i.exec(first);
+      if (!name && fromComment) name = fromComment[1];
+      const ext = EXT[lang] || (name.split(".").pop() || "txt").toLowerCase();
+      if (!name) name = DEFAULT_NAME[ext] || "file." + ext;
+      name = name.replace(/[^\w.-]/g, "_").slice(-40);
+      while (used.has(name)) name = name.replace(/(\.[^.]+)?$/, "2$1");
+      used.add(name);
+      files.push({ name, ext: name.split(".").pop().toLowerCase(), content: body.replace(/\s+$/, "") + "\n" });
+    }
+    return files;
+  }
+
+  function deliverFiles(text) {
+    const files = extractFiles(text);
+    if (!files.length) return;
+    for (const f of files) {
+      const data = String(f.content).replace(/\r/g, "").replace(/[^\n\t\x20-\x7E]/g, "?");
+      for (let i = 0; i < data.length || i === 0; i += 7000) send(i === 0 ? "W" : "Y", f.name + "\n" + data.slice(i, i + 7000));
+    }
+    const list = files.map((f) => `${f.name} (${f.content.length < 1024 ? f.content.length + " B" : (f.content.length / 1024).toFixed(1) + " KB"})`).join(", ");
+    const canShow = !!onPreview;
+    sendText("M", `Saved ${list} in ConMon's RAM disk${canShow ? "; the preview window shows it" : ""}. After exit: ls, cat ${files[0].name}`);
+    if (onPreview) try { onPreview(files); } catch (err) { console.error(err); }
   }
 
   // ---------------------------------------------------------- mp finder
@@ -695,6 +852,12 @@
     { re: /TinyLlama/i, maker: "TinyLlama project", context: "2K tokens", license: "apache-2.0",
       good: "quick experiments; answers can be shaky",
       about: "A 1.1B model trained on a huge amount of text for its size." },
+    { re: /mistral|mixtral|ministral/i, maker: "Mistral AI", about: "Open-weights models from the French lab Mistral AI." },
+    { re: /deepseek/i, maker: "DeepSeek", about: "Open-weights models from the Chinese lab DeepSeek." },
+    { re: /gpt-oss/i, maker: "OpenAI", about: "OpenAI's open-weights models." },
+    { re: /granite/i, maker: "IBM", about: "IBM's open Granite model family." },
+    { re: /olmo/i, maker: "Allen Institute for AI (Ai2)", about: "Fully open models: weights, data and training code." },
+    { re: /\bphi[-_]?\d/i, maker: "Microsoft", about: "Microsoft's small Phi model family." },
     { re: /Phi-3\.5/i, maker: "Microsoft", context: "128K tokens", license: "mit",
       good: "reasoning, math and code for its size",
       about: "Microsoft's small model trained mostly on carefully filtered and synthetic data." },
@@ -1541,6 +1704,8 @@
     checkGpu,
     onStateChange(fn) { onState = fn; fn(state); },
     onWindow(fn) { onWindow = fn; },
+    onPreview(fn) { onPreview = fn; },
+    haikuKeyChanged() { haikuReady = null; },
     get state() { return state; },
     // test hooks: let automated tests swap in fake engines
     _setWebLLM(mod) { webllm = mod; },

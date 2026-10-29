@@ -116,11 +116,21 @@
       .vm-type .field { font-size: 16px; }
       .vm-keys button { flex: 1 1 calc(20% - 6px); min-width: 0; min-height: 44px; }
     }
-    .doom-window .vm-title { cursor: default; }
+    .doom-window .vm-title, .preview-window .vm-title { cursor: default; }
+    .preview-window { width: min(720px, calc(100% - 36px)); }
+    .preview-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 10px 0; }
+    .preview-tabs button { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 4px 9px; font: 12px var(--mono); cursor: pointer; }
+    .preview-tabs button.on { border-color: var(--accent); color: var(--accent); }
+    .preview-frame { width: 100%; height: min(60vh, 460px); border: 0; background: #fff; margin-top: 6px; }
+    .preview-code { margin: 6px 0 0; padding: 10px 12px; height: min(60vh, 460px); overflow: auto; background: #05070a; color: #d7e0ea; font: 13px/1.45 var(--mono); white-space: pre; }
+    .preview-frame[hidden], .preview-code[hidden], .preview-tabs[hidden] { display: none; }
+    @media (max-width: 720px) { .preview-frame, .preview-code { height: calc(100vh - 130px); } .preview-window { width: auto; } }
     .doom-screen { cursor: default; }
     .doom-screen canvas { width: 100%; height: auto; aspect-ratio: 8 / 5; image-rendering: auto; }
     .doom-pad { padding: 0 12px 12px; }
     @media (max-width: 720px) { .doom-window { display: flex; } .doom-window[hidden] { display: none; } }
+    .haiku-key { display: flex; gap: 6px; }
+    .haiku-key .field { flex: 1; min-width: 0; font-family: var(--mono); }
     .screen-hint { margin: 8px 0 0; font-size: 13px; color: #a7f3c0; }
     .game-pad { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-top: 10px; user-select: none; -webkit-user-select: none; touch-action: none; }
     .game-pad[hidden], .keys[hidden] { display: none; }
@@ -216,6 +226,19 @@
               <button data-sc="15">Y</button>
               <button data-sc="58" class="pad-quit">QUIT</button>
             </div>
+          </div>
+          <!-- Files an AI wrote, shown live -->
+          <div class="vm-window preview-window" id="preview-window" hidden role="dialog" aria-label="File preview">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name" id="preview-name">Preview</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn" id="preview-mode">Code</button>
+              <a class="vm-btn" id="preview-download" download>Download</a>
+              <button class="vm-btn vm-close" id="preview-close" aria-label="Close the preview">✕</button>
+            </div>
+            <div class="preview-tabs" id="preview-tabs"></div>
+            <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" title="Preview of the AI's file"></iframe>
+            <pre class="preview-code" id="preview-code" hidden></pre>
           </div>
           <!-- DOOM in a window, opened by a guest (MikeOS's DOOM.BAS) over the serial port -->
           <div class="vm-window doom-window" id="doom-window" hidden role="dialog" aria-label="DOOM">
@@ -333,6 +356,13 @@
           </ul>
           <div class="muted small"><span class="mono">install llm all</span> downloads every model at once. <span class="mono">mp finder</span> shows facts about each model, with live stats from Hugging Face or Ollama.</div>
           <div class="file-info"><span id="pkg-gpu">WebGPU: checking…</span> · <span id="pkg-model">no model loaded</span></div>
+          <div class="pkg-row"><span class="mono">Haiku advancement</span><span class="pill" id="pkg-haiku">checking…</span></div>
+          <div class="muted small">After each answer, Claude Haiku 5.5 (by Anthropic) checks it, fixes mistakes and writes better code. Code in answers is saved as files in ConMon and shown in a preview window. It needs a Claude API key: set <span class="mono">ANTHROPIC_API_KEY</span> on Netlify, or paste one here (kept only in this browser). In a chat, <span class="mono">haiku off</span> turns it off.</div>
+          <form class="haiku-key" id="haiku-form" autocomplete="off">
+            <input class="field" id="haiku-key" type="password" placeholder="sk-ant-… (optional)" aria-label="Claude API key">
+            <button class="btn" type="submit">Save</button>
+            <button class="btn" type="button" id="haiku-clear">Clear</button>
+          </form>
           <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
           <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>. Type <span class="mono">cities Italy</span> to browse the 2,582 built-in cities.</div>
           <div class="pkg-row"><span class="mono">doom</span><span class="pill" id="pkg-doom">not installed</span></div>

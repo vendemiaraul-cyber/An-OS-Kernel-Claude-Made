@@ -161,10 +161,38 @@ Arrows or WASD move, Q/E strafe, Space fires, Enter starts, Esc quits.
 
 ## AI models (install llm)
 
-Models come from WebLLM's catalogue and download from Hugging Face the first
-time (0.4 to 3.5 GB), then stay cached in the browser. They need WebGPU:
-Chrome or Edge on a computer works best. The list only shows models whose
-size and GPU features fit the device.
+Every model is a real open model made by its own developer (Meta, Alibaba,
+Google, Hugging Face, Liquid AI, Microsoft...); ConMon only runs it and shows
+its words. Each model is told who really made it, and ConMon prints the maker
+when a model loads. SmartestChild is the one exception: a scripted retro bot
+(rules, no AI model), labelled as such.
+
+- **Transformers.js** and **WebLLM** models download from Hugging Face the
+  first time, then stay cached in the browser. WebLLM needs WebGPU (Chrome or
+  Edge on a computer); on phones Transformers.js runs on the CPU.
+- **Ollama** runs models on your own PC.
+
+### Haiku advancement
+
+After each answer, **Claude Haiku 5.5** (Anthropic, model `claude-haiku-5-5`)
+checks it, fixes mistakes and writes better code; its answer appears under
+`[Haiku advancement]`. Small local models get things wrong; this is what makes
+the answers dependable. It needs a Claude API key, in one of two ways:
+
+- **On Netlify (recommended):** set `ANTHROPIC_API_KEY` under Site
+  configuration → Environment variables. The key stays on the server; the
+  page calls `/api/claude` (`netlify/functions/claude.mjs`).
+- **In the browser:** paste a key in the Packages panel. It is kept only in
+  that browser and sent straight to api.anthropic.com.
+
+In a chat, `haiku off` / `haiku on` switches it. It is off in the offline preview.
+
+### Files and previews
+
+Code in an answer (```` ```html index.html ```` blocks) is saved as files in
+ConMon's RAM disk (`ls`, `cat index.html` after `exit`) and opened in a preview
+window on the page: web pages run live in a sandbox, other languages show as
+code with a Download button.
 
 ## Credits and licences
 
@@ -192,4 +220,6 @@ size and GPU features fit the device.
 - Pyodide (MPL-2.0), loaded from the jsDelivr CDN when you `install doomy`.
   doomy itself is ConMon Lab's own code (MIT).
 - WebLLM by the MLC team, Apache-2.0, loaded from the esm.run CDN at runtime.
+- Transformers.js by Hugging Face, Apache-2.0, loaded from jsDelivr at runtime.
+- Haiku advancement: Claude Haiku 5.5 by Anthropic, through your own API key.
 - YouTube is a trademark of Google LLC. This project isn't affiliated with YouTube.

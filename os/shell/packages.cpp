@@ -66,13 +66,13 @@ String lower(const char *s) {
     return out;
 }
 
-void save_file(Shell &sh, const hl_packet &p) {
-    // payload: "<name>\n<content>"
+void save_file(Shell &sh, const hl_packet &p, bool append = false) {
+    // payload: "<name>\n<content>"; 'Y' packets append the next part
     const char *d = reinterpret_cast<const char *>(p.data);
     String name;
     while (*d && *d != '\n') name += *d++;
     if (*d == '\n') d++;
-    sh.fs().write(name.c_str(), d, false);
+    sh.fs().write(name.c_str(), d, append);
 }
 
 bool host_available() {
@@ -149,6 +149,9 @@ JobResult host_job_ex(Shell &sh, const char *type, const char *payload, String *
         case 'W':
             save_file(sh, p);
             break;
+        case 'Y':
+            save_file(sh, p, true);
+            break;
         case 'M':
             if (showed_bar) { kputc('\n'); showed_bar = false; }
             kprintf("%s\n", d);
@@ -169,6 +172,21 @@ JobResult host_job_ex(Shell &sh, const char *type, const char *payload, String *
 
 bool host_job(Shell &sh, const char *type, const char *payload, String *done = nullptr) {
     return host_job_ex(sh, type, payload, done) == JOB_OK;
+}
+
+// Asks the host something and prints its one-line answer ('M').
+void show_host_message(Shell &, const char *type, const char *payload) {
+    hostlink_send(type, payload);
+    hl_packet p;
+    uint32_t start = now_ms();
+    while (now_ms() - start < 6000) {
+        if (!wait_packet(p, 6000)) break;
+        if (p.type == 'M' || p.type == 'E') {
+            Color c(p.type == 'M' ? VGA_LIGHT_GREEN : VGA_YELLOW);
+            kprintf("%s\n", reinterpret_cast<const char *>(p.data));
+            return;
+        }
+    }
 }
 
 // -------------------------------------------------------------- word wrap
@@ -373,7 +391,10 @@ void chat(Shell &sh) {
         Color c(VGA_YELLOW);
         kprintf("Talking to %s.\n", ready_label.c_str());
     }
-    print("Type exit to leave, reset for a new conversation. Ctrl+C stops an answer.\n\n");
+    print("Type exit to leave, reset for a new conversation, haiku on/off for the\n"
+          "Haiku advancement. Ctrl+C stops an answer. Code in answers is saved as files.\n");
+    show_host_message(sh, "llm.haiku", "");
+    print("\n");
     for (;;) {
         String line = sh.editor().read("you> ", false, 300);
         if (line.empty()) continue;
@@ -381,6 +402,11 @@ void chat(Shell &sh) {
         if (line == "reset") {
             hostlink_send("llm.reset", "");
             print("(new conversation)\n");
+            continue;
+        }
+        if (line == "haiku" || line == "haiku on" || line == "haiku off") {
+            show_host_message(sh, "llm.haiku", line == "haiku" ? "" : line.c_str() + 6);
+            print("\n");
             continue;
         }
         hostlink_send("llm.chat", line.c_str());
@@ -402,6 +428,13 @@ void chat(Shell &sh) {
                 break;                              // give up waiting for the rest
             }
             if (p.type == 'T') w.put(reinterpret_cast<const char *>(p.data));
+            else if (p.type == 'W') save_file(sh, p);
+            else if (p.type == 'Y') save_file(sh, p, true);
+            else if (p.type == 'M') {
+                w.flush();
+                Color g(VGA_LIGHT_GREEN);
+                kprintf("\n[%s]", reinterpret_cast<const char *>(p.data));
+            }
             else if (p.type == 'X') break;
             else if (p.type == 'E') { w.flush(); kputc('\n'); error("%s", reinterpret_cast<const char *>(p.data)); break; }
             else if (p.type == 'P') { /* model still loading: ignore */ }
