@@ -169,7 +169,7 @@
       if (done) break;
       if (cancelled) { reader.cancel(); throw new Error("Cancelled."); }
       parts.push(value); got += value.length;
-      onProgress(got / total);
+      onProgress(Math.min(1, got / total));
     }
     return new Blob(parts, { type: res.headers.get("content-type") || "application/octet-stream" });
   }
