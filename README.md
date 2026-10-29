@@ -172,6 +172,12 @@ when a model loads. SmartestChild is the one exception: a scripted retro bot
   Edge on a computer); on phones Transformers.js runs on the CPU.
 - **Ollama** runs models on your own PC.
 
+### If a model won't load: `models check`
+
+Type `models check` in ConMon. It tests this device line by line (WebGPU,
+free browser storage, Hugging Face, the Transformers.js and WebLLM
+libraries, Ollama and the Claude key) and marks what fails.
+
 ### Haiku advancement
 
 After each answer, **Claude Haiku 5.5** (Anthropic, model `claude-haiku-5-5`)

@@ -129,7 +129,7 @@
   let jobDepth = 0, keepAlive = 0;
   function jobStarted() { if (jobDepth++ === 0) keepAlive = setInterval(() => send("K", ""), 4000); }
   function jobEnded() { if (jobDepth > 0 && --jobDepth === 0) clearInterval(keepAlive); }
-  const LLM_JOBS = new Set(["llm.models", "llm.download", "llm.load", "llm.fetch", "llm.chat", "llm.info"]);
+  const LLM_JOBS = new Set(["llm.check", "llm.models", "llm.download", "llm.load", "llm.fetch", "llm.chat", "llm.info"]);
 
   // A job that never finishes (a stuck GPU, say) must not block the queue
   // for good: after a cancel or an unhandled error, waiting jobs may start.
@@ -180,6 +180,7 @@
         case "llm.chat": await chat(arg); break;
         case "llm.stop": stopGeneration(); break;
         case "llm.haiku": await setHaiku(arg); break;
+        case "llm.check": await checkSetup(); break;
         case "llm.reset": history = []; for (const k in smartestMemory) delete smartestMemory[k]; break;
         case "llm.info": await modelInfo(arg); break;
         case "meteo.show": await showMeteo(arg); break;
@@ -718,7 +719,7 @@
       const r = await fetch("/api/claude", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ system, messages, max_tokens: 4096 }) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || "Claude answered " + r.status);
+      if (!r.ok) throw new Error((d.error || "Claude answered") + " (" + r.status + ")");
       return d.text || "";
     }
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -758,6 +759,9 @@
       if (err.message === "NOKEY") {
         if (!haikuWarned) sendText("M", "Haiku advancement: add a Claude API key in the page's Packages panel (or ANTHROPIC_API_KEY on Netlify) to turn it on.");
         haikuWarned = true;
+      } else if (/401|403|invalid.*key|x-api-key|authentication/i.test(err.message)) {
+        haikuOn = false;
+        sendText("M", "Haiku advancement: Anthropic rejected the Claude API key (" + (err.message || "401").slice(0, 60) + "). Check ANTHROPIC_API_KEY on Netlify or the key on this page. Turned off for now.");
       } else {
         sendText("M", "Haiku advancement failed: " + explain(err).slice(0, 120));
       }
@@ -774,6 +778,58 @@
     const how = route === "site" ? "this site's key" : route === "browser" ? "the key saved on this page" : "no key yet (add one in the Packages panel)";
     sendText("M", PREVIEW ? "Haiku advancement needs internet, so it is off in this preview."
       : `Haiku advancement is ${haikuOn ? "ON" : "OFF"}: Claude Haiku 5.5 ${haikuOn ? "checks" : "won't check"} each answer. Using ${how}.`);
+  }
+
+  // ------------------------------------------------------ models check
+  //
+  // `models check` in ConMon: tests everything a model download needs on
+  // this device and says, line by line, what works and what doesn't.
+
+  async function checkSetup() {
+    setBusy("checking this device");
+    const line = (ok, text) => sendText("M", (ok === true ? "  OK    " : ok === false ? "  FAIL  " : "  NOTE  ") + text);
+    const timed = async (fn, ms) => Promise.race([fn(), new Promise((_, no) => setTimeout(() => no(new Error("timed out after " + ms / 1000 + " s")), ms))]);
+    sendText("M", "Checking what AI models need on this device:");
+    if (PREVIEW) { line(null, "This is the offline preview: only SmartestChild works here. Use your Netlify site."); setBusy(""); send("D", ""); return; }
+    line(null, `Device: ${MOBILE ? "phone/tablet" : "computer"}, about ${navigator.deviceMemory || "?"} GB of memory reported`);
+    const adapter = await gpuAdapter();
+    line(adapter ? true : null, adapter ? `WebGPU graphics: yes${adapter.features.has("shader-f16") ? ", half precision" : ""}` : "WebGPU: not available, so WebLLM is hidden; Transformers.js runs on the CPU");
+    try {
+      const e = await navigator.storage.estimate();
+      const free = (e.quota - (e.usage || 0)) / 1e6;
+      line(free > 600, `Browser storage: ${mbText(free)} free of ${mbText(e.quota / 1e6)}${free > 600 ? "" : " - too little for most models; free space or clear this site's data"}`);
+    } catch (err) { line(null, "Browser storage: the browser won't say how much is free"); }
+    try {
+      const r = await timed(() => fetch("https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/config.json", { cache: "no-store" }), 15000);
+      line(r.ok, r.ok ? "Hugging Face (where models download from): reachable" : `Hugging Face answered ${r.status}`);
+    } catch (err) { line(false, "Hugging Face unreachable: " + explain(err).slice(0, 90) + " (a blocker, VPN or network filter?)"); }
+    try {
+      if (!tfjs) tfjs = await timed(() => import(TFJS_URL), 30000);
+      line(!!tfjs.pipeline, "Transformers.js library (jsDelivr): loaded" + (tfjs.env && tfjs.env.version ? " v" + tfjs.env.version : ""));
+    } catch (err) { line(false, "Transformers.js didn't load: " + String(err.message || err).slice(0, 90)); }
+    if (adapter) {
+      progress(70, "WebLLM");
+      try {
+        if (!webllm) webllm = await timed(() => import(WEBLLM_URL), 30000);
+        line(!!webllm.MLCEngine, "WebLLM library (esm.run): loaded");
+      } catch (err) { line(false, "WebLLM didn't load: " + String(err.message || err).slice(0, 90)); }
+    }
+    try { const t = await ollamaTags(1500); line(true, `Ollama on this PC: ${t.length} model(s)`); }
+    catch (_) { line(null, "Ollama: not running on this device (optional; computers only)"); }
+    haikuReady = null;
+    const route = await haikuRoute();
+    if (!route) line(null, "Haiku advancement: no Claude API key yet (optional)");
+    else {
+      try {
+        const t = await timed(() => callHaiku("Reply with the single word: ready", [{ role: "user", content: "Are you there?" }]), 30000);
+        line(true, `Haiku advancement (${route === "site" ? "Netlify key" : "key on this page"}): Claude answered "${t.trim().slice(0, 20)}"`);
+      } catch (err) {
+        line(false, `Haiku advancement (${route === "site" ? "Netlify key" : "key on this page"}): ${String(err.message).slice(0, 90)}`);
+      }
+    }
+    sendText("M", "If a line says FAIL, that is what stops models loading here.");
+    setBusy("");
+    send("D", "");
   }
 
   // ------------------------------------------------- files from an answer

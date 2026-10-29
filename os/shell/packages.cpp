@@ -381,8 +381,9 @@ void install_all_models(Shell &sh) {
             ok, (uint32_t)todo.size());
 }
 
-void cmd_models(Shell &sh, const Args &) {
+void cmd_models(Shell &sh, const Args &a) {
     if (!host_available()) { no_host(); return; }
+    if (a.count() > 1 && lower(a[1]) == "check") { host_job(sh, "llm.check", ""); return; }
     pick_model(sh);
 }
 
@@ -763,7 +764,7 @@ void cmd_install(Shell &sh, const Args &a) {
     if (!host_job(sh, "pkg.install", "llm")) return;
     llm_installed = true;
     if (!sh.has("load")) {
-        sh.add(new FnCommand("models", "models", "pick an AI model (llm package)", cmd_models));
+        sh.add(new FnCommand("models", "models [check]", "pick an AI model (llm package)", cmd_models));
         sh.add(new FnCommand("load", "load [letter]", "talk to the AI model (llm package)", cmd_load));
         sh.add(new FnCommand("mp", "mp finder [letter]", "info on the AI models (llm package)", cmd_mp));
     }
