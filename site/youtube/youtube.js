@@ -55,7 +55,7 @@
   function setMode(m) {
     mode = m;
     const map = {
-      server: ["server key (Netlify Function)", "ok"],
+      server: ["server key", "ok"],
       browser: ["your key (this browser)", "ok"],
       none: ["no API key", "err"],
     };
@@ -63,7 +63,7 @@
     ui.mode.className = "badge " + map[m][1];
     if (m === "none") {
       ui.keyPanel.classList.remove("hidden");
-      notice("No API key is configured. Set YOUTUBE_API_KEY in Netlify's environment variables and redeploy, or paste a key above to test from this browser.", "warn");
+      notice("Paste a YouTube API key above to search; it stays in this browser. (On a Netlify copy of the site, YOUTUBE_API_KEY on the server works too.)", "warn");
     } else {
       hideNotice();
     }

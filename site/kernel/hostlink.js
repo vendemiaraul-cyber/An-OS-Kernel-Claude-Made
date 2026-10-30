@@ -200,7 +200,7 @@
     return lines;
   }
   async function installPs2() {
-    if (PREVIEW) throw new Error("The PS2 emulator needs your Netlify site; this offline preview can't run it.");
+    if (PREVIEW) throw new Error("The PS2 emulator needs the online site; this offline preview can't run it.");
     setBusy("installing ps2");
     const games = await ps2List();
     progress(40, "Checking the Play! PS2 emulator");

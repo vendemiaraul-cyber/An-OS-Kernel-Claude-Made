@@ -283,7 +283,7 @@ for (const b of ui.pad.querySelectorAll("button")) {
   try { sessionStorage.removeItem("conmon.coi"); } catch (_) {}
 
   const problems = [];
-  if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") problems.push("this page isn't cross-origin isolated (SharedArrayBuffer is off), so the emulator's threads can't start. Open it from your Netlify site, not a file or a plain local server");
+  if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") problems.push("this page isn't cross-origin isolated (SharedArrayBuffer is off), so the emulator's threads can't start. Open it from the online site, not a file");
   if (!document.createElement("canvas").getContext("webgl2")) problems.push("this browser has no WebGL 2");
   if (problems.length) { status("Can't run here: " + problems.join("; ") + ".", true); return; }
 

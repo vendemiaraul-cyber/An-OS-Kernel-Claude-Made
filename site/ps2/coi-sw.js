@@ -1,7 +1,7 @@
 // ConMon PS2 - cross-origin isolation for hosts that can't send headers.
 //
 // Play!'s threads need SharedArrayBuffer, which browsers only allow on a
-// page served with COOP/COEP headers. Netlify sends them (netlify.toml,
+// page served with COOP/COEP headers. Netlify can send them (netlify.toml,
 // _headers); GitHub Pages can't, so this service worker adds them to every
 // response in /ps2/ instead. ps2.js registers it only when the page isn't
 // isolated already.

@@ -1,6 +1,9 @@
 # ConMon Lab
 
-A Netlify site with two apps:
+**Live, free: https://vendemiaraul-cyber.github.io/An-OS-Kernel-Claude-Made/** (GitHub Pages, republished on every push to `main`
+by `.github/workflows/pages.yml`; Kernel Lab is at [`/kernel/`](https://vendemiaraul-cyber.github.io/An-OS-Kernel-Claude-Made/kernel/)).
+
+A static site with two apps:
 
 - **Kernel Lab** (`/kernel/`): boots **ConMon**, a tiny x86 OS written in C and
   C++, inside the [v86](https://github.com/copy/v86) emulator in your browser.
@@ -66,9 +69,19 @@ so instead of breaking). Use the launcher instead:
 - **Mac / Linux:** `sh start-mac-linux.sh` (needs python3).
 
 Everything except the YouTube app's server-side key and the PS2 emulator
-(it needs the cross-origin isolation headers Netlify adds) works this way.
+(it needs cross-origin isolation, which a plain local server doesn't give)
+works this way.
 
-## Deploy on Netlify (from GitHub)
+## GitHub Pages (the free link)
+
+Every push to `main` that touches `site/` runs `.github/workflows/pages.yml`:
+`tools/pages/build.py` copies `site/` with its root paths prefixed for
+`/<repo>/` and pushes it to the `gh-pages` branch, which GitHub Pages
+serves. GitHub Pages can't send the COOP/COEP headers the PS2 emulator needs,
+so `site/ps2/coi-sw.js` (a service worker) adds them in the browser. GitHub
+Pages runs no server code, so the YouTube app uses a key pasted into the page.
+
+## Deploy on Netlify instead (optional)
 
 1. Push this folder to a GitHub repository.
 2. In Netlify: **Add new site → Import an existing project → GitHub**, pick the repo.

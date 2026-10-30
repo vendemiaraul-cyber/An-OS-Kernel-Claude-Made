@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var info = KernelInfo.read()
-    @AppStorage("siteURL") private var siteURL = "https://merry-kringle-8e9af3.netlify.app"
+    @AppStorage("siteURL") private var siteURL = "https://vendemiaraul-cyber.github.io/An-OS-Kernel-Claude-Made"
     @Environment(\.openURL) private var openURL
 
     var body: some View {
