@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Quake II Engine</title>
+<link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Rubik:wght@400;500&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../kit/player.css">
+<style>
+  .shell.playing .bar{position:absolute;left:0;top:0;padding-top:calc(8px + env(safe-area-inset-top,0px));padding-left:calc(12px + env(safe-area-inset-left,0px));background:none}
+  .shell.playing .bar h1,.shell.playing .bar .status{display:none}
+  .stage canvas{width:100%!important;height:100%!important;max-width:none;max-height:none;image-rendering:auto}
+  .files{display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12px}
+  .files span{color:var(--muted)}
+  .files b{color:#7fe0a0;font-weight:500}
+  .row{left:calc(110px + env(safe-area-inset-left,0px));right:auto}
+  .btns{grid-template-columns:repeat(3,58px)}
+  .btns button{width:58px;height:58px}
+  .btns button.fire{grid-column:3;grid-row:1/span 2;width:58px;height:126px;border-radius:29px}
+</style>
+</head>
+<body>
+<div class="shell" id="shell">
+  <div class="bar">
+    <button class="chipbtn" id="back" type="button">‹ Arcade</button>
+    <h1>Quake II</h1>
+    <span class="status" id="status">Load your pak0.pak to begin</span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="canvas" tabindex="-1" aria-label="Quake II screen" oncontextmenu="event.preventDefault()"></canvas>
+
+    <div class="pad" id="pad" hidden>
+      <div class="look" id="look" aria-label="Drag to look around"></div>
+      <div class="stick" id="stick" aria-label="Move"><div class="knob"></div></div>
+      <div class="row">
+        <button type="button" data-key="esc" data-mode="tap">Menu</button>
+        <button type="button" data-key="up" data-mode="tap">▲</button>
+        <button type="button" data-key="down" data-mode="tap">▼</button>
+        <button type="button" data-key="enter" data-mode="tap">Enter</button>
+        <button type="button" data-key="f1" data-mode="tap">Goals</button>
+      </div>
+      <div class="btns">
+        <button type="button" data-key="space">Jump</button>
+        <button type="button" id="wpn">Weapon</button>
+        <button type="button" class="fire" data-key="ctrl">Fire</button>
+        <button type="button" data-key="c">Duck</button>
+        <button type="button" data-key="tab" data-mode="tap">Items</button>
+      </div>
+      <span class="portrait-hint">Turn your phone sideways</span>
+    </div>
+
+    <div class="gate" id="gate">
+      <div class="card">
+        <h2>Quake II</h2>
+        <p>Qwasm2, the Yamagi Quake II engine compiled to WebAssembly, runs right here.</p>
+        <div class="choices" role="radiogroup" aria-label="Game data">
+          <label class="choice"><input type="radio" name="data" value="demo" checked><span><b>Quake II demo</b><small>3 levels. Unpacked here from id Software’s original demo installer (37 MB download, once per visit).</small></span></label>
+          <label class="choice"><input type="radio" name="data" value="own" id="ownRadio"><span><b>My own pak files</b><small id="ownLbl">pak0.pak from your Quake II (Steam or GOG baseq2 folder), plus pak1/pak2 if you have them.</small></span></label>
+        </div>
+        <input id="paks" type="file" multiple hidden>
+        <div class="files" id="files" hidden></div>
+        <div class="meter"><i id="meter"></i></div>
+        <p class="small" id="dl">Use Wi-Fi for the first download.</p>
+        <button class="bigbtn" id="play" type="button">▶ Play!</button>
+        <p class="small">Touch: left stick moves, drag the right side to look, then Fire, Jump, Duck and Weapon. Keyboard, mouse and controllers work as on PC.</p>
+        <pre class="log" id="log" hidden></pre>
+        <p class="small">Engine: <a href="https://github.com/GMH-Code/Qwasm2" target="_blank" rel="noopener">Qwasm2</a> (GPL-2.0), build from <a href="https://github.com/EmilioNicolas/quake2-alfonso-x-1999" target="_blank" rel="noopener">this repo</a>. The demo is served as id Software’s unmodified <a href="../originals/q2-314-demo-x86.exe">q2-314-demo-x86.exe</a>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../kit/touchkit.js"></script>
+<script src="../kit/unzip.js"></script>
+<style>
+  .choices{display:flex;flex-direction:column;gap:8px}
+  .choice{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);cursor:pointer}
+  .choice input{margin-top:3px;accent-color:var(--amber)}
+  .choice b{display:block;font-family:var(--display);font-size:15px;letter-spacing:.02em}
+  .choice small{display:block;color:var(--muted);font-size:12px;line-height:1.4;margin-top:2px}
+  .choice:has(input:checked){border-color:var(--amber)}
+</style>
+<script>
+(function(){
+  'use strict';
+  var $=function(id){return document.getElementById(id)};
+  var canvas=$('canvas'), status=$('status'), log=$('log'), lines=[];
+  var paks=[], started=false, touch=TouchKit.isTouch();
+  var KNOWN={49951322:'Demo pak0.pak ✓',183997730:'Full game pak0.pak ✓',12992754:'pak1.pak (3.20 update) ✓',45055:'pak2.pak ✓'};
+  if(!touch) document.documentElement.classList.add('no-touch');
+  TouchKit.setTarget(canvas);
+
+  function write(m){lines.push(String(m)); if(lines.length>80) lines.shift(); log.textContent=lines.join('\n'); console.log('[q2]',m);}
+  function fail(m){status.textContent='Could not start'; status.classList.add('err'); $('gate').hidden=false; $('shell').classList.remove('playing'); log.hidden=false; write(m&&m.message?m.message:m); $('dl').textContent=(m&&m.message)||String(m); $('dl').classList.add('err');}
+  function progress(p,label){ $('meter').style.width=Math.round(p*100)+'%'; if(label) $('dl').textContent=label; }
+
+  $('back').addEventListener('click',function(){
+    if(window.parent!==window) window.parent.postMessage({pocketArcade:'close'},'*'); else history.back();
+  });
+
+  $('ownRadio').parentNode.addEventListener('click',function(){ if(!paks.length) setTimeout(function(){ $('paks').click(); },0); });
+  $('paks').addEventListener('change',function(){
+    $('files').hidden=false; $('ownRadio').checked=true;
+    var list=[].slice.call(this.files||[]); if(!list.length) return;
+    $('files').innerHTML=''; paks=[]; var pending=list.length;
+    list.forEach(function(f){
+      var row=document.createElement('div'); row.innerHTML='<span>Reading '+f.name.replace(/[<>&]/g,'')+'…</span>'; $('files').appendChild(row);
+      var r=new FileReader();
+      r.onload=function(){
+        var name=f.name.toLowerCase().replace(/[^a-z0-9._-]/g,'');
+        if(!/\.pak$/.test(name)) name='pak0.pak';
+        paks.push({name:name,data:new Uint8Array(r.result)});
+        row.innerHTML=(KNOWN[f.size]?'<b>'+KNOWN[f.size]+'</b>':'<span>'+name+' · '+(f.size/1048576).toFixed(1)+' MB</span>');
+        if(--pending===0) ready();
+      };
+      r.onerror=function(){ row.innerHTML='<span class="err">Could not read '+f.name.replace(/[<>&]/g,'')+'</span>'; if(--pending===0) ready(); };
+      r.readAsArrayBuffer(f);
+    });
+  });
+  function ready(){
+    var ok=paks.some(function(p){return p.name==='pak0.pak'});
+    status.textContent=ok?'Ready':'pak0.pak is required'; $('ownLbl').textContent=ok?'Your files are ready.':'pak0.pak is required.';
+  }
+
+  function viewport(){ var r=$('stage').getBoundingClientRect(); return {w:Math.max(320,Math.round(r.width)),h:Math.max(200,Math.round(r.height))}; }
+
+  var busy=false;
+  $('play').addEventListener('click',async function(){
+    if(started||busy) return;
+    var btn=this, choice=(document.querySelector('input[name=data]:checked')||{}).value||'demo';
+    if(choice==='own'&&!paks.some(function(p){return p.name==='pak0.pak'})){ $('paks').click(); return; }
+    busy=true; btn.disabled=true; btn.textContent='Loading…'; $('dl').classList.remove('err');
+    if(choice==='demo'){
+      try{
+        var exe=await ArcadeZip.download(['../originals/q2-314-demo-x86.exe'],39015499,function(p){progress(p*0.8,'Downloading the demo… '+Math.round(p*100)+'%');});
+        var pak=await ArcadeZip.extract(exe,'Install/Data/baseq2/pak0.pak',function(p){progress(0.8+p*0.2,'Unpacking pak0.pak… '+Math.round(p*100)+'%');});
+        exe=null; paks=[{name:'pak0.pak',data:pak}];
+      }catch(e){ busy=false; btn.disabled=false; btn.textContent='Try again'; fail(e); return; }
+    }
+    started=true;
+    $('gate').hidden=true; $('shell').classList.add('playing'); status.textContent='Starting…';
+    if(touch) $('pad').hidden=false;
+    var vp=viewport(), hasFull=paks.some(function(p){return p.data.length===183997730});
+    window.Module={
+      canvas:canvas,
+      touchRelativeMouse: touch ? true : undefined,
+      print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); },
+      printErr:function(t){ write(t); },
+      setStatus:function(t){ if(t) status.textContent=t; },
+      hideConsole:function(){ canvas.style.display='block'; },
+      showConsole:function(){ fail('The engine stopped. Details below.'); },
+      exportFile:function(){},
+      winResized:function(){},
+      setGamma:function(g){ g=Number(Number(g).toFixed(2)); canvas.style.filter=g<0?'':'brightness('+(g*2)+')'; },
+      captureMouse:function(){ if(!touch&&canvas.requestPointerLock){ try{ var p=canvas.requestPointerLock(); if(p&&p.catch) p.catch(function(){}); }catch(e){} } },
+      onRuntimeInitialized:function(){
+        try{ FS.mkdirTree&&FS.mkdirTree('/baseq2'); }catch(e){}
+        paks.forEach(function(p){ FS.writeFile('/baseq2/'+p.name,p.data); write(p.name+' loaded ('+p.data.length+' bytes)'); p.data=null; });
+      },
+      onAbort:function(e){ fail(e); },
+      arguments:[
+        '+set','vid_renderer','gles3',
+        '+set','r_mode','-1','+set','r_customwidth',String(vp.w),'+set','r_customheight',String(vp.h),
+        '+set','gl_msaa_samples','0','+set','gl_anisotropic','4',
+        '+set','freelook','1','+set','cl_run','1','+set','sensitivity','5','+set','crosshair','1',
+        '+set','skill','1','+map',hasFull?'base1':'demo1'
+      ]
+    };
+    var s=document.createElement('script'); s.src='index.js';
+    s.onerror=function(){ fail('Could not load the engine (index.js).'); };
+    document.body.appendChild(s);
+    setTimeout(function(){ status.textContent='Playing'; canvas.focus&&canvas.focus(); },1500);
+  });
+
+  /* Touch: stick = WASD, right side = mouse look, buttons = keys. */
+  TouchKit.bind($('pad'));
+  TouchKit.stick($('stick'),{up:'w',down:'s',left:'a',right:'d'},0.3);
+  (function(){
+    var look=$('look'), id=null, lx=0, ly=0;
+    function move(dx,dy){
+      var ev;
+      try{ ev=new MouseEvent('mousemove',{bubbles:true,cancelable:true,clientX:lx,clientY:ly,movementX:dx,movementY:dy}); }catch(e){ return; }
+      try{ if(ev.movementX!==dx){ Object.defineProperty(ev,'movementX',{get:function(){return dx}}); Object.defineProperty(ev,'movementY',{get:function(){return dy}}); } }catch(e){}
+      canvas.dispatchEvent(ev);
+    }
+    look.addEventListener('pointerdown',function(e){ e.preventDefault(); id=e.pointerId; lx=e.clientX; ly=e.clientY; try{look.setPointerCapture(id);}catch(x){} });
+    look.addEventListener('pointermove',function(e){ if(e.pointerId!==id) return; var dx=(e.clientX-lx)*2.2, dy=(e.clientY-ly)*2.2; lx=e.clientX; ly=e.clientY; move(Math.round(dx),Math.round(dy)); });
+    function end(e){ if(e.pointerId===id) id=null; }
+    look.addEventListener('pointerup',end); look.addEventListener('pointercancel',end);
+  })();
+  $('wpn').addEventListener('pointerdown',function(e){
+    e.preventDefault(); this.classList.add('on'); var b=this; setTimeout(function(){b.classList.remove('on')},120);
+    try{ canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:100,deltaMode:0})); }catch(x){}
+  });
+  addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','F1'].indexOf(e.key)>=0) e.preventDefault(); });
+})();
+</script>
+</body>
+</html>

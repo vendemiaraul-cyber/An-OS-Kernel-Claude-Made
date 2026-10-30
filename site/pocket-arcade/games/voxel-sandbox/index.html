@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" href="favicon.png" sizes="32x32" type="image/png">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxel Sandbox — Creative</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e14; font-family: "Courier New", monospace; }
+  #game { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* crosshair */
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; transform: translate(-50%,-50%); pointer-events: none; opacity: .9; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.85); mix-blend-mode: difference; }
+  #crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #crosshair::after { left: 0; top: 8px; width: 18px; height: 2px; }
+
+  /* hotbar */
+  #hotbar[hidden] { display: none; }
+  #hotbar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; background: rgba(10,12,16,.55); border: 2px solid rgba(255,255,255,.25); border-radius: 4px; }
+  .slot { width: 48px; height: 48px; border: 2px solid rgba(255,255,255,.18); border-radius: 2px; position: relative; background: rgba(0,0,0,.25); }
+  .slot canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+  .slot .num { position: absolute; left: 3px; top: 1px; font-size: 10px; color: rgba(255,255,255,.7); text-shadow: 0 1px 0 #000; }
+  .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+  #blockname { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); color: #fff; font-size: 13px; letter-spacing: 1px; text-shadow: 0 1px 2px #000; opacity: 0; transition: opacity .4s; pointer-events: none; }
+
+  /* HUD info */
+  #hud { position: fixed; left: 10px; top: 10px; color: rgba(255,255,255,.75); font-size: 11px; line-height: 1.6; text-shadow: 0 1px 2px #000; pointer-events: none; white-space: pre; }
+
+  /* start overlay */
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(8,10,14,.72); backdrop-filter: blur(3px); z-index: 10; }
+  #panel { text-align: center; color: #e8e6df; max-width: 420px; padding: 32px; }
+  #panel h1 { font-size: 28px; letter-spacing: 2px; margin: 0 0 6px; }
+  #panel p.sub { margin: 0 0 22px; color: #9aa3b2; font-size: 13px; }
+  #panel .keys { text-align: left; display: inline-block; font-size: 13px; line-height: 1.9; margin-bottom: 24px; color: #c7cdd8; }
+  #panel .keys div { display: flex; gap: 12px; white-space: nowrap; }
+  #panel .keys b { color: #fff; flex: 0 0 130px; }
+  #playBtn { display: block; margin: 0 auto 12px; padding: 12px 40px; font: bold 16px "Courier New", monospace; letter-spacing: 2px; white-space: nowrap; color: #0b0e14; background: #e8e6df; border: 0; border-radius: 3px; cursor: pointer; }
+  #playBtn:hover { background: #fff; }
+  #resetBtn { background: none; border: 0; color: #7a8494; font: 12px "Courier New", monospace; cursor: pointer; text-decoration: underline; }
+  #resetBtn:hover { color: #d88; }
+  #saveNote { position: fixed; right: 12px; top: 10px; color: rgba(255,255,255,.55); font-size: 11px; text-shadow: 0 1px 2px #000; opacity: 0; transition: opacity .5s; pointer-events: none; }
+</style>
+</head>
+<body>
+<script src="./version.js"></script>
+<div id="game"></div>
+<div id="crosshair" hidden></div>
+<div id="blockname"></div>
+<div id="hotbar" hidden></div>
+<div id="hud" hidden></div>
+<div id="saveNote">world saved</div>
+
+<div id="overlay">
+  <div id="panel">
+    <h1>VOXEL SANDBOX</h1>
+    <p class="sub">creative mode &middot; infinite blocks &middot; auto-saves to this browser</p>
+    <div class="keys">
+      <div><b>W A S D</b> move</div>
+      <div><b>Space</b> jump / fly up</div>
+      <div><b>Shift</b> fly down</div>
+      <div><b>F / 2&times;Space</b> toggle fly</div>
+      <div><b>Mouse</b> look</div>
+      <div><b>Left click</b> place block (or E)</div>
+      <div><b>Right click</b> break block (or Q)</div>
+      <div><b>1–9 / wheel</b> pick block</div>
+      <div><b>Esc</b> release mouse</div>
+    </div>
+    <button id="playBtn">CLICK TO PLAY</button>
+    <button id="resetBtn">reset world (deletes saved edits)</button>
+  </div>
+</div>
+
+<script src="./vendor/three.min.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   VOXEL SANDBOX — creative-mode voxel builder
+   ============================================================ */
+
+// ---------- world constants ----------
+const WX = 96, WY = 64, WZ = 96;        // world dims
+const CHUNK = 16;                        // chunk size (x,z)
+const CX = WX / CHUNK, CZ = WZ / CHUNK;
+const SAVE_KEY = "voxel-sandbox-world-v1";
+const DAY_LENGTH = 240;                  // seconds per full day/night cycle
+
+// ---------- block registry ----------
+// tile indices into 4x4 atlas
+const T = { GRASS_TOP:0, GRASS_SIDE:1, DIRT:2, STONE:3, SAND:4, LOG_SIDE:5, LOG_TOP:6, LEAVES:7, PLANKS:8, BRICK:9, GLASS:10, COBBLE:11 };
+// faces: [top, bottom, side]
+const BLOCKS = {
+  1: { name:"Grass",  faces:[T.GRASS_TOP, T.DIRT, T.GRASS_SIDE] },
+  2: { name:"Dirt",   faces:[T.DIRT, T.DIRT, T.DIRT] },
+  3: { name:"Stone",  faces:[T.STONE, T.STONE, T.STONE] },
+  4: { name:"Sand",   faces:[T.SAND, T.SAND, T.SAND] },
+  5: { name:"Log",    faces:[T.LOG_TOP, T.LOG_TOP, T.LOG_SIDE] },
+  6: { name:"Leaves", faces:[T.LEAVES, T.LEAVES, T.LEAVES], transparent:true },
+  7: { name:"Planks", faces:[T.PLANKS, T.PLANKS, T.PLANKS] },
+  8: { name:"Brick",  faces:[T.BRICK, T.BRICK, T.BRICK] },
+  9: { name:"Glass",  faces:[T.GLASS, T.GLASS, T.GLASS], transparent:true },
+ 10: { name:"Cobblestone", faces:[T.COBBLE, T.COBBLE, T.COBBLE] },
+};
+const HOTBAR = [1,2,3,4,5,6,7,8,9];      // block ids in hotbar
+
+// ---------- seeded RNG + value noise ----------
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hash2(x, y, seed){ let h = seed + x*374761393 + y*668265263; h = (h ^ (h >>> 13)) * 1274126177; h = h ^ (h >>> 16); return (h >>> 0) / 4294967296; }
+function smooth(t){ return t*t*(3-2*t); }
+function noise2(x, y, seed){
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const a = hash2(xi, yi, seed), b = hash2(xi+1, yi, seed), c = hash2(xi, yi+1, seed), d = hash2(xi+1, yi+1, seed);
+  const u = smooth(xf), v = smooth(yf);
+  return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v;
+}
+function fbm(x, y, seed){
+  return noise2(x*0.03, y*0.03, seed) * 0.6
+       + noise2(x*0.09, y*0.09, seed+7) * 0.28
+       + noise2(x*0.22, y*0.22, seed+13) * 0.12;
+}
+
+// ---------- world data ----------
+const vox = new Uint8Array(WX * WY * WZ);
+const idx = (x,y,z) => x + z*WX + y*WX*WZ;
+const inWorld = (x,y,z) => x>=0 && x<WX && y>=0 && y<WY && z>=0 && z<WZ;
+const getV = (x,y,z) => inWorld(x,y,z) ? vox[idx(x,y,z)] : 0;
+
+let seed = 1337;
+let edits = {};       // "x,y,z" -> id (0 = removed)
+let dirty = false;
+
+function generateWorld(){
+  vox.fill(0);
+  const SEA_DIRT = 3;
+  for (let x=0; x<WX; x++){
+    for (let z=0; z<WZ; z++){
+      const h = Math.floor(14 + fbm(x, z, seed) * 22);          // 14..36
+      for (let y=0; y<=h; y++){
+        let id;
+        if (y === h) id = h < 17 ? 4 : 1;                       // sand near low areas, grass elsewhere
+        else if (y >= h - SEA_DIRT) id = h < 17 ? 4 : 2;        // dirt / sand under-layer
+        else id = 3;                                            // stone
+        vox[idx(x,y,z)] = id;
+      }
+    }
+  }
+  // trees (sparse, on grass, away from edges)
+  const rng = mulberry32(seed * 31 + 5);
+  for (let i=0; i<90; i++){
+    const x = 3 + Math.floor(rng() * (WX-6));
+    const z = 3 + Math.floor(rng() * (WZ-6));
+    let h = WY-1; while (h>0 && !getV(x,h,z)) h--;
+    if (getV(x,h,z) !== 1) continue;                            // only on grass
+    if (rng() > 0.32) continue;
+    const trunk = 4 + Math.floor(rng()*2);
+    for (let t=1; t<=trunk; t++) vox[idx(x, h+t, z)] = 5;
+    const top = h + trunk;
+    for (let dx=-2; dx<=2; dx++) for (let dz=-2; dz<=2; dz++) for (let dy=0; dy<=1; dy++){
+      if (Math.abs(dx)===2 && Math.abs(dz)===2) continue;
+      const yy = top + dy;
+      if (inWorld(x+dx, yy, z+dz) && !getV(x+dx, yy, z+dz)) vox[idx(x+dx, yy, z+dz)] = 6;
+    }
+    for (let dx=-1; dx<=1; dx++) for (let dz=-1; dz<=1; dz++){
+      if (Math.abs(dx)+Math.abs(dz) > 1 && Math.random) {}
+      const yy = top + 2;
+      if ((dx===0||dz===0) && inWorld(x+dx, yy, z+dz) && !getV(x+dx, yy, z+dz)) vox[idx(x+dx, yy, z+dz)] = 6;
+    }
+  }
+  // apply saved edits
+  for (const k in edits){
+    const [x,y,z] = k.split(",").map(Number);
+    if (inWorld(x,y,z)) vox[idx(x,y,z)] = edits[k];
+  }
+}
+
+// ---------- save / load ----------
+function loadSave(){
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (typeof data.seed === "number") seed = data.seed;
+    if (data.edits && typeof data.edits === "object") edits = data.edits;
+  } catch(e) { /* corrupt save — ignore */ }
+}
+function saveWorld(){
+  if (!dirty) return;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ seed, edits }));
+    dirty = false;
+    const n = document.getElementById("saveNote");
+    n.style.opacity = 1; setTimeout(() => n.style.opacity = 0, 1200);
+  } catch(e) {}
+}
+setInterval(saveWorld, 10000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveWorld(); });
+window.addEventListener("beforeunload", saveWorld);
+
+// ---------- procedural texture atlas ----------
+const TILE = 16, ATLAS_TILES = 4, ATLAS_PX = TILE * ATLAS_TILES;
+const atlasCanvas = document.createElement("canvas");
+atlasCanvas.width = atlasCanvas.height = ATLAS_PX;
+(function paintAtlas(){
+  const ctx = atlasCanvas.getContext("2d");
+  const rng = mulberry32(999);
+  function px(tx, ty, x, y, r, g, b, a=255){
+    ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${a/255})`;
+    ctx.fillRect(tx*TILE + x, ty*TILE + y, 1, 1);
+  }
+  function fillTile(ti, fn){
+    const tx = ti % ATLAS_TILES, ty = Math.floor(ti / ATLAS_TILES);
+    ctx.clearRect(tx*TILE, ty*TILE, TILE, TILE);
+    for (let y=0; y<TILE; y++) for (let x=0; x<TILE; x++){
+      const c = fn(x, y, rng);
+      if (c) px(tx, ty, x, y, c[0], c[1], c[2], c[3] === undefined ? 255 : c[3]);
+    }
+  }
+  const jit = (rng, amt) => (rng() - 0.5) * amt;
+
+  fillTile(T.GRASS_TOP, (x,y,r) => { const v = jit(r,30); return [92+v, 158+v, 66+v]; });
+  fillTile(T.DIRT,      (x,y,r) => { const v = jit(r,26); return [128+v, 92+v, 62+v]; });
+  fillTile(T.GRASS_SIDE,(x,y,r) => {
+    const v = jit(r,26);
+    if (y < 3 || (y === 3 && r() < 0.5)) { const g = jit(r,30); return [92+g, 158+g, 66+g]; }
+    return [128+v, 92+v, 62+v];
+  });
+  fillTile(T.STONE, (x,y,r) => { const v = jit(r,18); return [126+v, 128+v, 132+v]; });
+  fillTile(T.SAND,  (x,y,r) => { const v = jit(r,20); return [216+v, 202+v, 152+v]; });
+  fillTile(T.LOG_SIDE, (x,y,r) => {
+    const stripe = (x % 4 === 0) ? -18 : 0; const v = jit(r,16);
+    return [104+v+stripe, 78+v+stripe, 48+v+stripe];
+  });
+  fillTile(T.LOG_TOP, (x,y,r) => {
+    const dx = x-7.5, dy = y-7.5, d = Math.sqrt(dx*dx+dy*dy);
+    const ring = (Math.floor(d) % 2 === 0) ? 14 : -8; const v = jit(r,10);
+    return [160+v+ring, 128+v+ring, 88+v+ring];
+  });
+  fillTile(T.LEAVES, (x,y,r) => {
+    if (r() < 0.12) return [0,0,0,0];
+    const v = jit(r,34); return [52+v, 118+v, 44+v];
+  });
+  fillTile(T.PLANKS, (x,y,r) => {
+    const v = jit(r,12);
+    const gap = (y % 4 === 3) ? -30 : 0;
+    const nail = (y % 4 === 3) ? 0 : ((x + Math.floor(y/4)*8) % 16 === 0 ? -26 : 0);
+    return [178+v+gap+nail, 140+v+gap+nail, 92+v+gap+nail];
+  });
+  fillTile(T.BRICK, (x,y,r) => {
+    const row = Math.floor(y / 4);
+    const off = (row % 2) * 4;
+    const mortar = (y % 4 === 3) || ((x + off) % 8 === 7);
+    const v = jit(r,14);
+    return mortar ? [168+v, 160+v, 152+v] : [158+v, 74+v, 58+v];
+  });
+  fillTile(T.GLASS, (x,y,r) => {
+    const edge = x===0 || y===0 || x===TILE-1 || y===TILE-1;
+    if (edge) return [200, 224, 232];
+    if (x + y === 10 || x + y === 11) return [230, 244, 248, 200];
+    return [0,0,0,0];
+  });
+  fillTile(T.COBBLE, (x,y,r) => {
+    const n = noise2(x*0.55, y*0.55, 42);
+    const v = jit(r,14);
+    const c = n > 0.62 ? 96 : n < 0.35 ? 148 : 122;
+    return [c+v, c+v+2, c+v+4];
+  });
+})();
+
+// ---------- three.js setup ----------
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 600);
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const gameEl = document.getElementById("game");
+gameEl.appendChild(renderer.domElement);
+function fitRenderer(){
+  const w = gameEl.clientWidth || innerWidth, h = gameEl.clientHeight || innerHeight;
+  if (!w || !h) return;
+  const cur = renderer.getSize(new THREE.Vector2());
+  if (cur.x === w && cur.y === h) return;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+fitRenderer();
+new ResizeObserver(fitRenderer).observe(gameEl);
+addEventListener("resize", fitRenderer);
+
+const atlasTex = new THREE.CanvasTexture(atlasCanvas);
+atlasTex.magFilter = THREE.NearestFilter;
+atlasTex.minFilter = THREE.NearestFilter;
+atlasTex.generateMipmaps = false;
+atlasTex.colorSpace = THREE.SRGBColorSpace;
+
+const blockMat = new THREE.MeshLambertMaterial({ map: atlasTex, alphaTest: 0.35, side: THREE.FrontSide });
+
+// lights
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x6b5a44, 0.5);
+scene.add(sun, ambient, hemi);
+scene.fog = new THREE.Fog(0x87b5e0, 60, 220);
+
+// block highlight
+const hlGeo = new THREE.BoxGeometry(1.002, 1.002, 1.002);
+const highlight = new THREE.LineSegments(
+  new THREE.EdgesGeometry(hlGeo),
+  new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.65 })
+);
+highlight.visible = false;
+scene.add(highlight);
+
+// ---------- chunk meshing ----------
+// face defs: dir, normal, 4 corners (CCW from outside)
+const FACES = [
+  { d:[ 1,0,0], n:[ 1,0,0], c:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]], side:2 },
+  { d:[-1,0,0], n:[-1,0,0], c:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]], side:2 },
+  { d:[0, 1,0], n:[0, 1,0], c:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]], side:0 },
+  { d:[0,-1,0], n:[0,-1,0], c:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]], side:1 },
+  { d:[0,0, 1], n:[0,0, 1], c:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]], side:2 },
+  { d:[0,0,-1], n:[0,0,-1], c:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]], side:2 },
+];
+const UVQ = [[0,0],[0,1],[1,1],[1,0]]; // matches corner winding per-face below
+const chunkMeshes = new Array(CX * CZ).fill(null);
+
+function tileUV(ti, u, v){
+  const tx = ti % ATLAS_TILES, ty = Math.floor(ti / ATLAS_TILES);
+  const pad = 0.02 / ATLAS_TILES;
+  const s = 1 / ATLAS_TILES;
+  return [ tx*s + pad + u*(s - 2*pad), 1 - (ty*s + pad + (1-v)*(s - 2*pad)) ];
+}
+
+function buildChunk(ci, cj){
+  const old = chunkMeshes[ci + cj*CX];
+  if (old){ scene.remove(old); old.geometry.dispose(); }
+
+  const pos = [], norm = [], uv = [], index = [];
+  let vi = 0;
+  const x0 = ci*CHUNK, z0 = cj*CHUNK;
+
+  for (let y=0; y<WY; y++){
+    for (let z=z0; z<z0+CHUNK; z++){
+      for (let x=x0; x<x0+CHUNK; x++){
+        const id = vox[idx(x,y,z)];
+        if (!id) continue;
+        const def = BLOCKS[id];
+        for (let f=0; f<6; f++){
+          const F = FACES[f];
+          const nx = x+F.d[0], ny = y+F.d[1], nz = z+F.d[2];
+          const nid = getV(nx,ny,nz);
+          if (nid){
+            const ndef = BLOCKS[nid];
+            if (!ndef.transparent) continue;             // hidden by solid
+            if (nid === id) continue;                    // glass-glass, leaves-leaves
+          }
+          const ti = def.faces[F.side];
+          for (let k=0; k<4; k++){
+            const c = F.c[k];
+            pos.push(x + c[0], y + c[1], z + c[2]);
+            norm.push(F.n[0], F.n[1], F.n[2]);
+            // uv: project corner onto face plane
+            let u, v;
+            if (F.n[1] !== 0)      { u = c[0]; v = c[2]; }
+            else if (F.n[0] !== 0) { u = F.n[0] > 0 ? 1-c[2] : c[2]; v = c[1]; }
+            else                   { u = F.n[2] > 0 ? 1-c[0] : c[0]; v = c[1]; }
+            const t = tileUV(ti, u, v);
+            uv.push(t[0], t[1]);
+          }
+          index.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+          vi += 4;
+        }
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(norm, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  const mesh = new THREE.Mesh(geo, blockMat);
+  mesh.frustumCulled = true;
+  scene.add(mesh);
+  chunkMeshes[ci + cj*CX] = mesh;
+}
+
+function buildAll(){ for (let j=0; j<CZ; j++) for (let i=0; i<CX; i++) buildChunk(i,j); }
+
+function rebuildAt(x, z){
+  const ci = Math.floor(x / CHUNK), cj = Math.floor(z / CHUNK);
+  buildChunk(ci, cj);
+  const lx = x % CHUNK, lz = z % CHUNK;
+  if (lx === 0 && ci > 0)        buildChunk(ci-1, cj);
+  if (lx === CHUNK-1 && ci < CX-1) buildChunk(ci+1, cj);
+  if (lz === 0 && cj > 0)        buildChunk(ci, cj-1);
+  if (lz === CHUNK-1 && cj < CZ-1) buildChunk(ci, cj+1);
+}
+
+// ---------- player ----------
+const player = {
+  pos: new THREE.Vector3(WX/2 + 0.5, 40, WZ/2 + 0.5),
+  yaw: Math.PI * 0.25, pitch: -0.25,
+  vel: new THREE.Vector3(),
+};
+const keys = {};
+let lastSpaceTap = 0;
+addEventListener("keydown", e => {
+  keys[e.code] = true;
+  if (e.code.startsWith("Digit")){
+    const n = +e.code.slice(5);
+    if (n >= 1 && n <= HOTBAR.length) selectSlot(n-1);
+  }
+  if (locked && e.code === "KeyF" && !e.repeat) toggleFly();
+  if (locked && e.code === "Space" && !e.repeat){
+    const now = performance.now();
+    if (now - lastSpaceTap < 280) { toggleFly(); lastSpaceTap = 0; }
+    else lastSpaceTap = now;
+  }
+  if (e.code === "Space") e.preventDefault();
+});
+addEventListener("keyup", e => keys[e.code] = false);
+
+// ---------- pointer lock (with drag-look fallback) ----------
+const overlay = document.getElementById("overlay");
+const playBtn = document.getElementById("playBtn");
+let locked = false;        // game active
+let fallbackMode = false;  // pointer lock unavailable: drag to look
+let dragging = false, dragMoved = 0, dragButton = -1;
+
+function setActive(on){
+  locked = on;
+  overlay.style.display = on ? "none" : "flex";
+  // in fallback mode the mouse cursor IS the aim point — no centered crosshair
+  document.getElementById("crosshair").hidden = !on || fallbackMode;
+  document.getElementById("hotbar").hidden = !on;
+  document.getElementById("hud").hidden = !on;
+}
+
+function startFallback(){
+  if (locked) return;
+  fallbackMode = true;
+  setActive(true);
+  document.getElementById("crosshair").hidden = true;
+  const sub = document.querySelector("#panel p.sub");
+  if (sub) sub.textContent = "aim with mouse \u00b7 drag to look \u00b7 quick click to place / right-click to break \u00b7 Esc for menu";
+}
+
+playBtn.addEventListener("click", () => {
+  if (fallbackMode){ setActive(true); return; }
+  let p;
+  try { p = renderer.domElement.requestPointerLock(); }
+  catch(e){ startFallback(); return; }
+  if (p && p.catch) p.catch(startFallback);
+  setTimeout(() => { if (!locked) startFallback(); }, 400);
+});
+document.addEventListener("pointerlockerror", startFallback);
+document.addEventListener("pointerlockchange", () => {
+  if (fallbackMode) return;
+  setActive(document.pointerLockElement === renderer.domElement);
+});
+addEventListener("keydown", e => {
+  if (e.code === "Escape" && fallbackMode && locked) setActive(false);
+  if (locked && e.code === "KeyQ") doAction(0);   // break
+  if (locked && e.code === "KeyE") doAction(2);   // place
+});
+const mouseNDC = new THREE.Vector2(0, 0);   // aim point (fallback mode tracks the cursor)
+addEventListener("mousemove", e => {
+  if (fallbackMode){
+    const r = renderer.domElement.getBoundingClientRect();
+    mouseNDC.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  }
+  if (!locked) return;
+  if (fallbackMode && !dragging) return;
+  if (fallbackMode) dragMoved += Math.abs(e.movementX) + Math.abs(e.movementY);
+  player.yaw   -= e.movementX * 0.0024;
+  player.pitch -= e.movementY * 0.0024;
+  player.pitch = Math.max(-1.55, Math.min(1.55, player.pitch));
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (!confirm("Delete all your edits and regenerate the world?")) return;
+  localStorage.removeItem(SAVE_KEY);
+  edits = {}; dirty = false;
+  seed = Math.floor(Math.random() * 1e6);
+  dirty = true;
+  generateWorld(); buildAll();
+});
+
+// ---------- hotbar UI ----------
+let selected = 0;
+const hotbarEl = document.getElementById("hotbar");
+const nameEl = document.getElementById("blockname");
+let nameTimer = 0;
+
+function thumbFor(id){
+  const c = document.createElement("canvas");
+  c.width = c.height = TILE;
+  const g = c.getContext("2d");
+  const ti = BLOCKS[id].faces[2];
+  const tx = ti % ATLAS_TILES, ty = Math.floor(ti / ATLAS_TILES);
+  // checkered backing so glass reads
+  g.fillStyle = "#222"; g.fillRect(0,0,TILE,TILE);
+  g.drawImage(atlasCanvas, tx*TILE, ty*TILE, TILE, TILE, 0, 0, TILE, TILE);
+  return c;
+}
+HOTBAR.forEach((id, i) => {
+  const s = document.createElement("div");
+  s.className = "slot";
+  s.appendChild(thumbFor(id));
+  const num = document.createElement("span");
+  num.className = "num"; num.textContent = i+1;
+  s.appendChild(num);
+  s.addEventListener("click", () => selectSlot(i));
+  hotbarEl.appendChild(s);
+});
+function selectSlot(i){
+  selected = i;
+  [...hotbarEl.children].forEach((el, k) => el.classList.toggle("sel", k === i));
+  nameEl.textContent = BLOCKS[HOTBAR[i]].name;
+  nameEl.style.opacity = 1;
+  clearTimeout(nameTimer);
+  nameTimer = setTimeout(() => nameEl.style.opacity = 0, 1200);
+}
+selectSlot(0);
+addEventListener("wheel", e => {
+  if (!locked) return;
+  selectSlot((selected + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length);
+});
+
+// ---------- targeting + edit ----------
+const raycaster = new THREE.Raycaster();
+raycaster.far = 8;
+let target = null; // { block:[x,y,z], place:[x,y,z] }
+
+const centerNDC = new THREE.Vector2(0, 0);
+function updateTarget(){
+  raycaster.setFromCamera(fallbackMode ? mouseNDC : centerNDC, camera);
+  const meshes = chunkMeshes.filter(Boolean);
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (!hits.length){ target = null; highlight.visible = false; return; }
+  const h = hits[0];
+  const n = h.face.normal;
+  const p = h.point;
+  const bx = Math.floor(p.x - n.x*0.5), by = Math.floor(p.y - n.y*0.5), bz = Math.floor(p.z - n.z*0.5);
+  const px = bx + n.x, py = by + n.y, pz = bz + n.z;
+  target = { block:[bx,by,bz], place:[px,py,pz] };
+  highlight.position.set(bx+0.5, by+0.5, bz+0.5);
+  highlight.visible = true;
+}
+
+function setBlock(x, y, z, id){
+  if (!inWorld(x,y,z)) return;
+  if (y === 0 && id === 0) return;              // keep bedrock layer
+  vox[idx(x,y,z)] = id;
+  edits[`${x},${y},${z}`] = id;
+  dirty = true;
+  rebuildAt(x, z);
+}
+
+function doAction(button){
+  if (!target) return;
+  if (button === 0){
+    const [x,y,z] = target.block;
+    setBlock(x, y, z, 0);
+  } else if (button === 2){
+    const [x,y,z] = target.place;
+    // don't place inside the player's collision box
+    const fx = player.pos.x, fy = player.pos.y - P_EYE, fz = player.pos.z;
+    if (x+1 > fx-P_HALF && x < fx+P_HALF && y+1 > fy && y < fy+P_H && z+1 > fz-P_HALF && z < fz+P_HALF) return;
+    if (getV(x,y,z)) return;
+    setBlock(x, y, z, HOTBAR[selected]);
+  }
+}
+
+// left click = place, right click = break
+const mouseAction = btn => btn === 0 ? 2 : btn === 2 ? 0 : -1;
+addEventListener("mousedown", e => {
+  if (!locked) return;
+  if (e.target.closest && (e.target.closest("#overlay") || e.target.closest("#hotbar"))) return;
+  if (fallbackMode){
+    dragging = true; dragMoved = 0; dragButton = e.button;
+    return;
+  }
+  const a = mouseAction(e.button);
+  if (a >= 0) doAction(a);
+});
+addEventListener("mouseup", e => {
+  if (!fallbackMode || !locked || !dragging) return;
+  dragging = false;
+  if (e.target.closest && e.target.closest("#hotbar")) return;
+  const a = mouseAction(dragButton);
+  if (dragMoved < 6 && a >= 0) doAction(a);   // quick click = act, drag = look
+});
+addEventListener("contextmenu", e => e.preventDefault());
+
+// ---------- day / night ----------
+const skyDay    = new THREE.Color(0x87b5e0);
+const skyDusk   = new THREE.Color(0xd88a5a);
+const skyNight  = new THREE.Color(0x0d1424);
+const skyCur    = new THREE.Color();
+let dayTime = DAY_LENGTH * 0.25; // start mid-morning
+
+function updateSky(dt){
+  dayTime = (dayTime + dt) % DAY_LENGTH;
+  const ang = (dayTime / DAY_LENGTH) * Math.PI * 2;    // 0 = sunrise
+  const elev = Math.sin(ang);                          // -1..1
+  sun.position.set(Math.cos(ang) * 100, elev * 100, 30);
+  sun.intensity = Math.max(0.05, elev) * 2.2;
+  ambient.intensity = 0.18 + Math.max(0, elev) * 0.42;
+  hemi.intensity = 0.15 + Math.max(0, elev) * 0.4;
+
+  if (elev > 0.15) skyCur.copy(skyDay);
+  else if (elev > -0.12){
+    const t = (elev + 0.12) / 0.27;
+    skyCur.copy(skyNight).lerp(skyDusk, t);
+    if (elev > 0) skyCur.lerp(skyDay, elev / 0.15);
+  } else skyCur.copy(skyNight);
+
+  scene.background = skyCur;
+  scene.fog.color.copy(skyCur);
+}
+scene.background = skyDay.clone();
+
+// ---------- movement ----------
+const FLY_SPEED = 11, WALK_SPEED = 5.6, SPRINT = 1.9;
+const GRAVITY = 26, JUMP_V = 8.4;
+const P_HALF = 0.3, P_H = 1.8, P_EYE = 1.62;   // player collision box + eye height
+let flying = false;
+let onGround = false;
+
+function toggleFly(){
+  flying = !flying;
+  if (flying) player.vel.y = 0;
+}
+
+// does the player AABB (feet at fx,fy,fz) overlap any solid block?
+function boxHit(fx, fy, fz){
+  const x0 = Math.floor(fx - P_HALF), x1 = Math.floor(fx + P_HALF);
+  const y0 = Math.floor(fy),          y1 = Math.floor(fy + P_H);
+  const z0 = Math.floor(fz - P_HALF), z1 = Math.floor(fz + P_HALF);
+  for (let y=y0; y<=y1; y++) for (let z=z0; z<=z1; z++) for (let x=x0; x<=x1; x++){
+    if (getV(x,y,z)) return true;
+  }
+  return false;
+}
+
+function updatePlayer(dt){
+  const sprint = (keys["ControlLeft"] || keys["KeyR"]) ? SPRINT : 1;
+  const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const wish = new THREE.Vector3();
+  if (keys["KeyW"]) wish.add(fwd);
+  if (keys["KeyS"]) wish.sub(fwd);
+  if (keys["KeyD"]) wish.add(right);
+  if (keys["KeyA"]) wish.sub(right);
+  if (wish.lengthSq()) wish.normalize();
+
+  const k = 1 - Math.pow(0.0001, dt);
+  if (flying){
+    wish.multiplyScalar(FLY_SPEED * sprint);
+    if (keys["Space"]) wish.y += FLY_SPEED * sprint;
+    if (keys["ShiftLeft"] || keys["ShiftRight"]) wish.y -= FLY_SPEED * sprint;
+    player.vel.lerp(wish, k);
+  } else {
+    wish.multiplyScalar(WALK_SPEED * sprint);
+    player.vel.x += (wish.x - player.vel.x) * k;
+    player.vel.z += (wish.z - player.vel.z) * k;
+    player.vel.y -= GRAVITY * dt;
+    if (keys["Space"] && onGround) player.vel.y = JUMP_V;
+  }
+
+  // per-axis collide & move (substepped so fast flight can't tunnel through blocks)
+  let fx = player.pos.x, fy = player.pos.y - P_EYE, fz = player.pos.z;
+  const steps = Math.max(1, Math.ceil(player.vel.length() * dt / 0.4));
+  const sdt = dt / steps;
+  onGround = false;
+  for (let s=0; s<steps; s++){
+    fx += player.vel.x * sdt;
+    if (boxHit(fx, fy, fz)){
+      fx = player.vel.x > 0 ? Math.floor(fx + P_HALF) - P_HALF - 0.001
+                            : Math.floor(fx - P_HALF) + 1 + P_HALF + 0.001;
+      player.vel.x = 0;
+    }
+    fz += player.vel.z * sdt;
+    if (boxHit(fx, fy, fz)){
+      fz = player.vel.z > 0 ? Math.floor(fz + P_HALF) - P_HALF - 0.001
+                            : Math.floor(fz - P_HALF) + 1 + P_HALF + 0.001;
+      player.vel.z = 0;
+    }
+    fy += player.vel.y * sdt;
+    if (boxHit(fx, fy, fz)){
+      if (player.vel.y <= 0){ fy = Math.floor(fy) + 1; onGround = true; }
+      else fy = Math.floor(fy + P_H) - P_H - 0.001;
+      player.vel.y = 0;
+    }
+  }
+
+  player.pos.set(fx, fy + P_EYE, fz);
+  player.pos.y = Math.max(1.5, Math.min(WY + 20, player.pos.y));
+  player.pos.x = Math.max(-40, Math.min(WX + 40, player.pos.x));
+  player.pos.z = Math.max(-40, Math.min(WZ + 40, player.pos.z));
+
+  camera.position.copy(player.pos);
+  camera.rotation.set(0,0,0);
+  camera.rotateY(player.yaw);
+  camera.rotateX(player.pitch);
+}
+
+// ---------- HUD ----------
+const hudEl = document.getElementById("hud");
+let hudTimer = 0;
+function updateHUD(dt){
+  hudTimer -= dt;
+  if (hudTimer > 0) return;
+  hudTimer = 0.25;
+  const p = player.pos;
+  const hrs = Math.floor(((dayTime / DAY_LENGTH) * 24 + 6) % 24);
+  hudEl.textContent = `xyz ${p.x.toFixed(0)} ${p.y.toFixed(0)} ${p.z.toFixed(0)}\ntime ${String(hrs).padStart(2,"0")}:00\n${flying ? "flying" : "walking"} (F)`;
+}
+
+// ---------- boot ----------
+loadSave();
+generateWorld();
+buildAll();
+
+// spawn standing on the terrain at world center
+(function spawn(){
+  const sx = Math.floor(WX/2), sz = Math.floor(WZ/2);
+  let h = WY-1; while (h > 0 && !getV(sx, h, sz)) h--;
+  player.pos.set(sx + 0.5, h + 1 + P_EYE, sz + 0.5);
+})();
+
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (locked) updatePlayer(dt);
+  updateSky(dt);
+  updateTarget();
+  updateHUD(dt);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+</script>
+<nav id="game-nav" aria-label="Game navigation" style="position:fixed;right:10px;bottom:8px;z-index:2147483647;display:flex;gap:12px;align-items:center;font:600 13px/1.4 system-ui,-apple-system,sans-serif;padding:6px 11px;border-radius:8px;background:rgba(15,17,26,.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);opacity:.55;transition:opacity .2s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">
+  <span id="version-badge" title="Version" style="color:#5a6072"></span>
+  <span style="color:#5a6072" aria-hidden="true">·</span>
+  <a href="https://github.freaxnx01.ch/games/" style="color:#8fd8e8;text-decoration:none">More Games…</a>
+  <span style="color:#5a6072" aria-hidden="true">·</span>
+  <a href="https://github.com/freaxnx01/game-voxel-sandbox" target="_blank" rel="noopener" style="color:#8fd8e8;text-decoration:none">Source</a>
+  <span style="color:#5a6072" aria-hidden="true">·</span>
+  <a href="https://github.com/freaxnx01/game-voxel-sandbox/issues/new?title=%5BFeedback%5D%20game-voxel-sandbox&labels=feedback" target="_blank" rel="noopener" style="color:#8fd8e8;text-decoration:none">Feedback</a>
+  <span style="color:#5a6072" aria-hidden="true">·</span>
+  <a class="github-button" href="https://github.com/freaxnx01/game-voxel-sandbox" data-icon="octicon-star" data-size="small" data-show-count="true" aria-label="Star freaxnx01/game-voxel-sandbox on GitHub">Star</a>
+</nav>
+
+<script>
+  (function () {
+    var el = document.getElementById('version-badge');
+    if (!el) return;
+    var a = document.createElement('a');
+    a.href = 'https://github.com/freaxnx01/game-voxel-sandbox/blob/main/CHANGELOG.md';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = 'Changelog';
+    a.textContent = 'v' + (window.GAME_VERSION || '0.0.0');
+    a.style.color = 'inherit';
+    a.style.textDecoration = 'none';
+    el.appendChild(a);
+  })();
+</script>
+<!-- game-nav-fullscreen:start -->
+<script>
+// Fullscreen toggle for #game-nav (freaxnx01.github.io issue #25).
+// Self-contained: inserts a button into whatever #game-nav exists and
+// re-asserts it for 10 s, so dc bundles that replaceWith() the DOM keep it.
+(function () {
+  var d = document;
+  if (!(d.fullscreenEnabled || d.webkitFullscreenEnabled)) return;
+  function fsEl() { return d.fullscreenElement || d.webkitFullscreenElement || null; }
+  function sync() {
+    var b = d.getElementById("fs-toggle");
+    if (!b) return;
+    var on = !!fsEl();
+    b.textContent = on ? "✕" : "⛶";
+    b.title = on ? "Exit fullscreen" : "Fullscreen";
+    b.setAttribute("aria-label", b.title);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  function toggle() {
+    var p;
+    try {
+      if (fsEl()) {
+        p = (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      } else {
+        var r = d.documentElement;
+        p = (r.requestFullscreen || r.webkitRequestFullscreen).call(r);
+      }
+    } catch (e) {}
+    if (p && p.catch) p.catch(function () {});
+  }
+  function sep() {
+    var s = d.createElement("span");
+    s.setAttribute("aria-hidden", "true");
+    s.style.cssText = "color:#5a6072";
+    s.textContent = "·";
+    return s;
+  }
+  function ensure() {
+    var nav = d.getElementById("game-nav");
+    if (!nav || d.getElementById("fs-toggle")) return;
+    var b = d.createElement("button");
+    b.id = "fs-toggle";
+    b.type = "button";
+    b.style.cssText = "background:none;border:0;padding:0;margin:0;cursor:pointer;color:#8fd8e8;font:inherit;line-height:1";
+    // blur(): keyboard games would otherwise re-trigger the focused button
+    // with Enter/Space and silently toggle fullscreen back.
+    b.addEventListener("click", function () { toggle(); b.blur(); });
+    var badge = d.getElementById("version-badge");
+    if (badge && badge.parentNode === nav) {
+      nav.insertBefore(b, badge.nextSibling);
+      nav.insertBefore(sep(), b);
+    } else {
+      nav.insertBefore(sep(), nav.firstChild);
+      nav.insertBefore(b, nav.firstChild);
+    }
+    sync();
+  }
+  d.addEventListener("fullscreenchange", sync);
+  d.addEventListener("webkitfullscreenchange", sync);
+  d.addEventListener("DOMContentLoaded", ensure);
+  window.addEventListener("load", ensure);
+  ensure();
+  var n = 0, iv = setInterval(function () { ensure(); if (++n >= 40) clearInterval(iv); }, 250);
+})();
+</script>
+<!-- game-nav-fullscreen:end -->
+<!-- game-nav-buildtime:start -->
+<script>
+// Build-time tooltip for #version-badge: when this page was last deployed
+// (GitHub Pages serves the build time as Last-Modified), in the visitor's own
+// time zone, plus how long ago. Self-contained and delegated on document, so
+// the age is fresh on every hover and a badge that gets recreated keeps it.
+(function () {
+  var d = document;
+  var built = new Date(d.lastModified);
+  if (isNaN(built)) return;
+  var WORDS = {
+    en: { now: "just now", d: ["day", "days"], h: ["hour", "hours"], m: ["minute", "minutes"] },
+    de: { now: "gerade eben", d: ["Tag", "Tagen"], h: ["Stunde", "Stunden"], m: ["Minute", "Minuten"] }
+  };
+  // The two largest units: "1 day 2 hours", "1 hour 35 minutes", "35 minutes".
+  function ago(ms, lang) {
+    var w = WORDS[lang], mins = Math.floor(ms / 60000);
+    if (mins < 1) return w.now;
+    var parts = [[Math.floor(mins / 1440), w.d], [Math.floor(mins / 60) % 24, w.h], [mins % 60, w.m]];
+    while (!parts[0][0]) parts.shift();
+    var text = parts.slice(0, 2).filter(function (p) { return p[0]; }).map(function (p) {
+      return p[0] + " " + p[1][p[0] === 1 ? 0 : 1];
+    }).join(" ");
+    return lang === "de" ? "vor " + text : text + " ago";
+  }
+  function tip() {
+    var lang = window.GG_LANG === "de" || (!window.GG_LANG && /^de/i.test(navigator.language || "")) ? "de" : "en";
+    // The browser's own date format, unless the game was switched to the other language.
+    var locale = (navigator.language || "").toLowerCase().indexOf(lang) === 0 ? undefined : lang;
+    var when = built.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
+    return "Build: " + when + " (" + ago(Date.now() - built, lang) + ") · Changelog";
+  }
+  function refresh(e) {
+    var badge = e.target && e.target.closest && e.target.closest("#version-badge");
+    if (!badge) return;
+    var t = tip(), a = badge.querySelector("a");
+    badge.title = t;
+    if (a) a.title = t;
+  }
+  d.addEventListener("mouseover", refresh);
+  d.addEventListener("focusin", refresh);
+})();
+</script>
+<!-- game-nav-buildtime:end -->
+<script src="touch.js"></script>
+</body>
+</html>

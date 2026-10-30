@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>DOOM Engine</title>
+<link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Rubik:wght@400;500&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../kit/player.css">
+</head>
+<body>
+<div class="shell">
+  <div class="bar">
+    <button class="chipbtn" id="back" type="button">‹ Arcade</button>
+    <h1>DOOM</h1>
+    <span class="status" id="status">Getting ready…</span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="DOOM screen"></canvas>
+
+    <div class="pad" id="pad">
+      <div class="stick" id="stick" aria-label="Move and turn"><div class="knob"></div></div>
+      <div class="row">
+        <button type="button" data-key="esc" data-mode="tap">Menu</button>
+        <button type="button" data-key="enter" data-mode="tap">Enter</button>
+        <button type="button" data-key="y" data-mode="tap">Yes</button>
+        <button type="button" data-key="tab" data-mode="tap">Map</button>
+      </div>
+      <div class="btns">
+        <button type="button" data-key="space">Use</button>
+        <button type="button" class="fire" data-key="ctrl">Fire</button>
+        <button type="button" id="wpn">Weapon</button>
+      </div>
+      <span class="portrait-hint">Turn your phone sideways</span>
+    </div>
+
+
+    <div class="gate" id="gate">
+      <div class="card">
+        <h2>DOOM</h2>
+        <p>The DOOM engine (Chocolate Doom) compiled to WebAssembly, running on this page.</p>
+        <div class="choices" role="radiogroup" aria-label="Game">
+          <label class="choice"><input type="radio" name="game" value="shareware" checked><span><b>DOOM · Knee-Deep in the Dead</b><small>id Software's shareware episode, 9 levels. Unpacked here from the original 1995 archive (2.3 MB).</small></span></label>
+          <label class="choice"><input type="radio" name="game" value="freedoom"><span><b>Freedoom: Phase 2</b><small>Free 32-level game for the DOOM engine (27 MB).</small></span></label>
+          <label class="choice"><input type="radio" name="game" value="own" id="ownRadio"><span><b>My own WAD</b><small id="ownLbl">DOOM.WAD, DOOM2.WAD and others from your Files app.</small></span></label>
+        </div>
+        <input id="wad" type="file" hidden>
+        <div class="meter"><i id="meter"></i></div>
+        <p class="small" id="dl">Loading the engine…</p>
+        <button class="bigbtn" id="play" type="button" disabled>Loading…</button>
+        <p class="small">Touch: the stick moves and turns, then Fire, Use and Weapon. Menu, Enter and Yes work the menus. Keyboards and controllers work as on PC.</p>
+        <pre class="log" id="log" hidden></pre>
+        <p class="small">Engine: Chocolate Doom, GPL-2.0 (<a href="https://github.com/dzod992-bit/freedoom-web/tree/main/source" target="_blank" rel="noopener">source</a>). Shareware DOOM is served as id Software's unmodified <a href="../originals/doom19s.zip">doom19s.zip</a>. Freedoom is BSD-3-Clause.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .choices{display:flex;flex-direction:column;gap:8px}
+  .choice{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);cursor:pointer}
+  .choice input{margin-top:3px;accent-color:var(--amber)}
+  .choice b{display:block;font-family:var(--display);font-size:15px;letter-spacing:.02em}
+  .choice small{display:block;color:var(--muted);font-size:12px;line-height:1.4;margin-top:2px}
+  .choice:has(input:checked){border-color:var(--amber)}
+</style>
+<script src="../kit/touchkit.js"></script>
+<script src="../kit/unzip.js"></script>
+<script src="doom.js"></script>
+<script>
+(function(){
+  'use strict';
+  var $=function(id){return document.getElementById(id)};
+  var canvas=$('canvas'), status=$('status'), play=$('play'), log=$('log');
+  var doom=null, running=false, userWad=null, lines=[];
+  if(!TouchKit.isTouch()) document.documentElement.classList.add('no-touch');
+  TouchKit.setTarget(canvas);
+
+  function write(m){lines.push(String(m)); if(lines.length>80) lines.shift(); log.textContent=lines.join('\n'); console.log('[doom]',m);}
+  function fail(e){ status.textContent='Could not start'; status.classList.add('err'); $('gate').hidden=false; log.hidden=false; write(e&&e.message?e.message:e); $('dl').textContent=(e&&e.message)||String(e); $('dl').classList.add('err'); play.disabled=false; play.textContent='Try again'; running=false; }
+  function progress(p,label){ $('meter').style.width=Math.round(p*100)+'%'; if(label) $('dl').textContent=label; }
+
+  $('back').addEventListener('click',function(){
+    try{ if(doom&&running){doom._M_SaveDefaults&&doom._M_SaveDefaults(); doom.flushSaves&&doom.flushSaves();} }catch(e){}
+    if(window.parent!==window) window.parent.postMessage({pocketArcade:'close'},'*'); else history.back();
+  });
+
+  $('ownRadio').addEventListener('change',function(){ if(!userWad) $('wad').click(); });
+  $('ownRadio').parentNode.addEventListener('click',function(){ if(userWad) return; setTimeout(function(){ $('wad').click(); },0); });
+  $('wad').addEventListener('change',function(){
+    var f=this.files&&this.files[0]; if(!f) return;
+    var r=new FileReader();
+    r.onload=function(){ userWad={name:f.name.toLowerCase().replace(/[^a-z0-9._-]/g,'')||'user.wad',data:new Uint8Array(r.result)}; $('ownLbl').textContent='Using '+f.name; $('ownRadio').checked=true; };
+    r.onerror=function(){ fail('Could not read '+f.name); };
+    r.readAsArrayBuffer(f);
+  });
+
+  // The engine starts with an empty data package; the chosen WAD is added at Play time.
+  createDoom({
+    canvas:canvas, print:write, printErr:write, onAbort:fail,
+    getPreloadedPackage:function(){ return new ArrayBuffer(0); },
+    onGameReady:function(){ status.textContent='Playing'; },
+    onExit:function(){ running=false; status.textContent='Game ended. Reload to play again.'; },
+    storageStatus:function(m){ write(m); }
+  }).then(function(m){
+    doom=m; window.doom=m; play.disabled=false; play.textContent='▶ Play!'; status.textContent='Ready'; progress(0,'Ready. Saves stay on this device.');
+  }).catch(fail);
+
+  async function getWad(choice){
+    if(choice==='own'){
+      if(!userWad) throw new Error('Choose a WAD file first.');
+      return {path:'/'+userWad.name, data:userWad.data, args:[]};
+    }
+    if(choice==='freedoom'){
+      var fb=await ArcadeZip.download(['freedoom2.wad'],28787748,function(p){progress(p,'Downloading Freedoom… '+Math.round(p*100)+'%');});
+      return {path:'/freedoom2.wad', data:new Uint8Array(fb), args:['-warp','1','-skill','3']};
+    }
+    // Shareware: id's original archive holds a two-part self-extractor that contains DOOM1.WAD.
+    var zip=await ArcadeZip.download(['../originals/doom19s.zip'],2450688,function(p){progress(p*0.6,'Downloading shareware DOOM… '+Math.round(p*100)+'%');});
+    progress(0.65,'Unpacking…');
+    var a=await ArcadeZip.extract(zip,'DOOMS_19.1'), b=await ArcadeZip.extract(zip,'DOOMS_19.2');
+    var sfx=new Uint8Array(a.length+b.length); sfx.set(a); sfx.set(b,a.length);
+    var wad=await ArcadeZip.extract(sfx.buffer,'DOOM1.WAD',function(p){progress(0.7+p*0.3,'Unpacking DOOM1.WAD…');});
+    return {path:'/doom1.wad', data:wad, args:['-skill','3']};
+  }
+
+  play.addEventListener('click',async function(){
+    if(!doom||running) return;
+    var choice=(document.querySelector('input[name=game]:checked')||{}).value||'shareware';
+    running=true; play.disabled=true; play.textContent='Loading…'; $('dl').classList.remove('err');
+    // Resume audio while we still have the tap.
+    var ac=doom.SDL2&&doom.SDL2.audioContext; if(ac&&ac.state==='suspended') ac.resume().catch(function(){});
+    try{
+      var w=await getWad(choice);
+      doom.FS.writeFile(w.path,w.data); w.data=null;
+      $('gate').hidden=true; canvas.focus({preventScroll:true}); status.textContent='Starting…';
+      doom.callMain(['-iwad',w.path,'-savedir','/persist','-config','/persist/default.cfg','-extraconfig','/persist/chocolate-doom.cfg','-window','-novert','-nogui'].concat(w.args));
+    }catch(e){ if(!(e&&e.name==='ExitStatus')) fail(e); }
+  });
+
+  // Fit the 4:3 picture inside the stage (the engine may restyle the canvas).
+  function fit(){
+    var st=$('stage').getBoundingClientRect(), ar=4/3, w=st.width, h=w/ar;
+    if(h>st.height){ h=st.height; w=h*ar; }
+    canvas.style.setProperty('width',Math.floor(w)+'px','important');
+    canvas.style.setProperty('height',Math.floor(h)+'px','important');
+  }
+  fit(); addEventListener('resize',fit); setInterval(fit,1000);
+
+  TouchKit.bind($('pad'));
+  TouchKit.stick($('stick'),{up:'up',down:'down',left:'left',right:'right'},0.35);
+  var wpn=1; $('wpn').addEventListener('pointerdown',function(e){ e.preventDefault(); wpn=wpn%7+1; TouchKit.tap(String(wpn)); this.textContent='Wpn '+wpn; });
+  canvas.addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','F1','F2','F3'].indexOf(e.key)>=0) e.preventDefault(); });
+  document.addEventListener('visibilitychange',function(){ if(document.hidden&&doom&&running){ try{doom._M_SaveDefaults(); doom.flushSaves();}catch(e){} } });
+})();
+</script>
+</body>
+</html>
