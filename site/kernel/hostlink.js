@@ -108,7 +108,7 @@
           break;
         case "meteo.show": await showMeteo(arg); break;
         case "meteo.cities": await listCities(arg); break;
-        case "doom.start": await startDoom(); break;
+        case "doom.start": await startDoom(arg); break;
         case "doomy.start": await startDoomy(); break;
         case "ext.load": await loadExtension(arg); break;
         case "ext.done": if (state.game === "native doom") { state.game = ""; onState(state); } break;
@@ -221,8 +221,10 @@
     const games = await ps2List();
     const g = games.find((x) => x.letter.toLowerCase() === String(letter).trim().toLowerCase());
     if (!g) throw new Error(`No PS2 game with letter ${letter}. Type run game to see the list.`);
-    if (onWindow) onWindow("ps2", g);
-    sendText("M", `Opened ${g.name} in ConMon Lab: tap Play in its window. It runs in a new tab.`);
+    const where = onWindow ? onWindow("ps2", g) : "";
+    sendText("M", where === "screen"
+      ? `${g.name} is running on ConMon's screen. Back to ConMon (or F12) returns.`
+      : `Opened ${g.name} in ConMon Lab: tap Play in its window. It runs in a new tab.`);
     send("D", "");
   }
 
@@ -665,7 +667,7 @@
     if (!game.acked || now - game.lastSend < 66) return;               // ~15 frames a second
     const px = game.frame();
     if (!px) return;
-    sendIndexed(px);
+    (game.draw || sendIndexed)(px);
     game.acked = false;
     game.ackWait = game.lastSend = now;
   }
@@ -674,7 +676,7 @@
     clearInterval(game.timer);
     const wasRunning = !!game.name;
     if (game.stop) try { game.stop(); } catch (_) {}
-    Object.assign(game, { name: "", timer: 0, frame: null, key: null, stop: null, acked: true, e0: false });
+    Object.assign(game, { name: "", timer: 0, frame: null, draw: null, key: null, stop: null, acked: true, e0: false });
     state.game = "";
     setBusy("");
     if (wasRunning && message !== null) {
@@ -761,7 +763,35 @@
     };
   }
 
-  async function startDoom() {
+  // ASCII DOOM: each 80x25 text cell gets one character whose ink density
+  // follows the cell's brightness, coloured with the nearest palette colour
+  // of the cell's hue (at full brightness, so dark areas stay readable).
+  const ASCII_RAMP = " .,:;-~=+*o#%@";
+  function asciiFrame(lut, rgba, W, H) {
+    const out = new Uint8Array(1 + 25 * 160);
+    out[0] = 25;
+    const bw = W / 80, bh = H / 25;
+    for (let y = 0; y < 25; y++) {
+      for (let x = 0; x < 80; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 2; sx++) {
+          const i = ((Math.floor(y * bh + (sy + 0.5) * bh / 3)) * W + Math.floor(x * bw + (sx + 0.5) * bw / 2)) * 4;
+          b += rgba[i]; g += rgba[i + 1]; r += rgba[i + 2];
+        }
+        r /= 6; g /= 6; b /= 6;
+        const lum = Math.min(255, (0.3 * r + 0.59 * g + 0.11 * b) * 1.6);
+        const ch = ASCII_RAMP[Math.min(ASCII_RAMP.length - 1, Math.floor(lum / 256 * ASCII_RAMP.length))];
+        const m = Math.max(r, g, b, 1), k = 255 / m;        // hue at full brightness
+        const c = lut[((Math.min(255, r * k) >> 3) << 10) | ((Math.min(255, g * k) >> 3) << 5) | (Math.min(255, b * k) >> 3)];
+        const cell = y * 80 + x;
+        out[1 + cell] = ch.charCodeAt(0);
+        out[1 + 2000 + cell] = c || 14;                     // never black ink on black
+      }
+    }
+    return out;
+  }
+
+  async function startDoom(mode) {
     stopGame(null);
     setBusy("loading DOOM");
     const lut = paletteLUT(DOOM_PALETTE);
@@ -769,6 +799,18 @@
     const doom = await startDoomInstance((rgba, w, h) => { latest = rgba; W = w; H = h; },
       () => stopGame("DOOM has quit."));
     sendPalette(DOOM_PALETTE);
+    if (mode === "ascii") {
+      Object.assign(game, {
+        name: "doom", acked: true, lastSend: 0,
+        key: (code, down, ext) => doom.key(code, down, ext),
+        frame: () => (latest && W ? asciiFrame(lut, latest, W, H) : null),
+        draw: (frame) => send("A", frame),
+      });
+      state.game = "doom";
+      setBusy("playing ASCII DOOM");
+      game.timer = setInterval(() => { if (doom.tick()) pumpGame(); }, 28);
+      return;
+    }
     const px = new Uint8Array(80 * 50);
     Object.assign(game, {
       name: "doom", acked: true, lastSend: 0,
@@ -953,6 +995,7 @@
     onByte,
     onStateChange(fn) { onState = fn; fn(state); },
     onWindow(fn) { onWindow = fn; },
+    ps2Closed(name) { if (emu) sendText("M", `Back from ${name || "the PS2 game"}.`); },
     get state() { return state; },
   };
 })();

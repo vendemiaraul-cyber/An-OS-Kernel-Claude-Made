@@ -2,6 +2,20 @@
 (() => {
   "use strict";
 
+  // GitHub Pages can't send the cross-origin isolation headers the PS2
+  // emulator needs; coi-sw.js (a service worker at the site's root) adds
+  // them, after one reload on the first visit.
+  if (!window.crossOriginIsolated && "serviceWorker" in navigator && window.isSecureContext) {
+    let tried = false;
+    try { tried = sessionStorage.getItem("conmon.coi.kernel") === "1"; } catch (_) {}
+    navigator.serviceWorker.register("../coi-sw.js", { scope: "../" }).then(async (reg) => {
+      if (tried) return;
+      try { sessionStorage.setItem("conmon.coi.kernel", "1"); } catch (_) {}
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller || !window.crossOriginIsolated) location.reload();
+    }).catch((e) => console.warn("No service worker:", e));
+  }
+
   const $ = (id) => document.getElementById(id);
   const ui = {
     status: $("status"), statusText: $("status-text"), name: $("current-name"),
@@ -376,20 +390,53 @@
   host.onWindow((what, arg) => {
     if (what === "doom") openDoomWindow();
     else if (what === "android") openAndroid();
-    else if (what === "ps2") openPs2(arg);
+    else if (what === "ps2") return openPs2(arg);
+    return "";
   });
 
-  // PS2 games run on /ps2/ (cross-origin isolated, so not in this page).
-  // A tap opens it: browsers only allow a new tab from a tap.
-  const ps2 = { win: $("ps2-window"), name: $("ps2-name"), about: $("ps2-about"), needs: $("ps2-needs"), play: $("ps2-play"), game: null };
+  // PS2 games: when this page is cross-origin isolated (Netlify's headers,
+  // or the service worker below on GitHub Pages), Play! runs in a frame that
+  // takes the place of ConMon's screen. Otherwise a window offers a new tab.
+  const ps2 = { win: $("ps2-window"), name: $("ps2-name"), about: $("ps2-about"), needs: $("ps2-needs"), play: $("ps2-play"),
+    frame: $("ps2-frame"), game: null };
   function openPs2(g) {
     ps2.game = g;
+    if (window.crossOriginIsolated) {
+      ps2.win.hidden = true;
+      ui.fit.hidden = true;
+      ui.keys.hidden = true;
+      ui.gamePad.hidden = true;
+      ui.typebar.hidden = true;
+      ps2.frame.style.height = "";
+      ps2.frame.hidden = false;
+      ps2.frame.src = "/ps2/?game=" + encodeURIComponent(g.id) + "&go=1&embed=1";
+      ps2.frame.focus();
+      return "screen";
+    }
     ps2.name.textContent = "PS2 · " + g.name;
     ps2.about.textContent = g.name + ": " + g.by + " (" + g.licence + ").";
     ps2.needs.textContent = g.demo ? "Plays " + g.demo.label + ". Own Quake II? Pick its pak0.pak on the game's page for the full game."
       : g.needs ? "Needs " + g.needs.what + ". You pick it once on the game's page; it stays in this browser." : "";
     ps2.win.hidden = false;
+    return "window";
   }
+  function closePs2Screen() {
+    if (ps2.frame.hidden) return;
+    ps2.frame.src = "about:blank";               // ends the emulator and frees its memory
+    ps2.frame.hidden = true;
+    ui.fit.hidden = false;
+    ui.typebar.hidden = false;
+    ui.keys.hidden = !!host.state.game;
+    ui.gamePad.hidden = !host.state.game;
+    host.ps2Closed(ps2.game && ps2.game.name);
+    setTimeout(fitScreen, 50);
+    ui.fit.focus({ preventScroll: true });
+  }
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin || !e.data || typeof e.data !== "object") return;
+    if (e.data.ps2 === "quit") closePs2Screen();
+    else if (e.data.ps2 === "height" && !ps2.frame.hidden) ps2.frame.style.height = Math.max(200, Math.min(4000, +e.data.h || 0)) + "px";
+  });
   $("ps2-close").addEventListener("click", () => { ps2.win.hidden = true; ui.fit.focus({ preventScroll: true }); });
   ps2.play.addEventListener("click", () => {
     if (!ps2.game) return;

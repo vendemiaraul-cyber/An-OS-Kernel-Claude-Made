@@ -17,6 +17,18 @@ const ui = {
 };
 
 let game = null;          // entry from games.json
+// ?embed=1: running inside Kernel Lab, in place of ConMon's screen.
+const EMBED = new URLSearchParams(location.search).get("embed") === "1" && window.parent !== window;
+if (EMBED) {
+  document.body.classList.add("embed");
+  const quit = () => window.parent.postMessage({ ps2: "quit" }, location.origin);
+  document.getElementById("quit").addEventListener("click", quit);
+  window.addEventListener("keydown", (e) => { if (e.code === "F12") { e.preventDefault(); quit(); } }, true);
+  // Tell Kernel Lab how tall the game (and the touch pad) is.
+  const report = () => window.parent.postMessage({ ps2: "height", h: Math.ceil(document.documentElement.scrollHeight) }, location.origin);
+  new ResizeObserver(report).observe(document.body);
+  window.addEventListener("load", report);
+}
 let data = null;          // File or Blob with the game data, if the game needs some
 let Module = null;
 

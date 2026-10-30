@@ -25,6 +25,12 @@
 # The PS2 page runs Play!, whose threads need SharedArrayBuffer, which
 # browsers only give a cross-origin isolated page.
 [[headers]]
+  for = "/kernel/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+
+[[headers]]
   for = "/ps2/*"
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"

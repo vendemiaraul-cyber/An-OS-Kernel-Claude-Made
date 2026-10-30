@@ -21,7 +21,7 @@
   <meta name="description" content="Boot ConMon or your own x86 kernel in the browser with the v86 emulator.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2313171c'/%3E%3Crect x='3' y='3' width='6' height='6' rx='1' fill='%234ade80'/%3E%3C/svg%3E">
   <style>
@@ -33,6 +33,8 @@
     .monitor-bar .btn { padding: 6px 10px; font-size: 13px; }
     .monitor-bar .name { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; flex: 1 1 140px; min-width: 0; }
     .screen-fit { position: relative; background: #000; border-radius: 6px; overflow: hidden; min-height: 200px; cursor: text; }
+    .ps2-frame { display: block; width: 100%; aspect-ratio: 4 / 3; border: 0; border-radius: 6px; background: #000; }
+    .ps2-frame[hidden], .screen-fit[hidden], .typebar[hidden] { display: none; }
     .screen-fit:focus-within, .screen-fit.focused { outline: 1px solid rgba(74,222,128,.35); }
     #screen { transform-origin: top left; display: inline-block; }
     #screen > div { white-space: pre; font: 14px/14px var(--mono); color: #c0c0c0; }
@@ -188,6 +190,8 @@
             </div>
           </div>
 
+          <!-- PS2 games run here, in place of ConMon's screen -->
+          <iframe class="ps2-frame" id="ps2-frame" hidden title="PS2 game" allow="cross-origin-isolated; autoplay; fullscreen; gamepad"></iframe>
           <p class="screen-hint" id="screen-hint" hidden></p>
           <form class="typebar" id="typebar" autocomplete="off">
             <input class="field" id="type-input" placeholder="Type a command and press Send (handy on phones)" enterkeyhint="send" autocapitalize="off" spellcheck="false">
@@ -272,11 +276,6 @@
               <p class="small muted" id="android-status"></p>
             </div>
           </div>
-          </div>
-            <div class="preview-tabs" id="preview-tabs"></div>
-            <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" title="Preview of the AI's file"></iframe>
-            <pre class="preview-code" id="preview-code" hidden></pre>
-          </div>
           <!-- DOOM in a window, opened by a guest (MikeOS's DOOM.BAS) over the serial port -->
           <div class="vm-window doom-window" id="doom-window" hidden role="dialog" aria-label="DOOM">
             <div class="vm-title">
@@ -319,6 +318,7 @@
             <button class="chip" data-cmd="crash">crash</button>
             <button class="chip pkg" data-cmd="install doom">install doom</button>
             <button class="chip pkg" data-cmd="doom">doom</button>
+            <button class="chip pkg" data-cmd="doom ascii">doom ascii</button>
             <button class="chip pkg" data-cmd="install native doom">install native doom</button>
             <button class="chip pkg" data-cmd="native doom">native doom</button>
             <button class="chip pkg" data-cmd="install doomy">install doomy</button>
@@ -388,11 +388,11 @@
           <h2>Packages</h2>
           <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs games, fetches weather, then streams the results back into the OS.</p>
           <div class="pkg-row"><span class="mono">ps2</span><span class="pill" id="pkg-ps2">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install ps2</span> for the PS2 games, each with a letter, then <span class="mono">run game A</span>. They run in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, in a new tab. A: Quake II (glampert's PS2 port) with the free demo's 3 levels; your own <span class="mono">pak0.pak</span> unlocks the full game.</div>
+          <div class="muted small">Type <span class="mono">install ps2</span> for the PS2 games, each with a letter, then <span class="mono">run game A</span>. They run in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, right on ConMon's screen. A: Quake II (glampert's PS2 port) with the free demo's 3 levels; your own <span class="mono">pak0.pak</span> unlocks the full game.</div>
           <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
           <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>. Type <span class="mono">cities Italy</span> to browse the 2,582 built-in cities.</div>
           <div class="pkg-row"><span class="mono">doom</span><span class="pill" id="pkg-doom">not installed</span></div>
-          <div class="muted small">Type <span class="mono">install doom</span>, then <span class="mono">doom</span>: the real DOOM (shareware Episode 1) drawn on ConMon's text screen. Arrows move, Ctrl fires, Space opens doors, F12 (or QUIT) goes back. On a phone the game pad appears under the screen.</div>
+          <div class="muted small">Type <span class="mono">install doom</span>, then <span class="mono">doom</span>: the real DOOM (shareware Episode 1) drawn on ConMon's text screen, or <span class="mono">doom ascii</span> to draw it in ASCII characters. Arrows move, Ctrl fires, Space opens doors, F12 (or QUIT) goes back. On a phone the game pad appears under the screen.</div>
           <div class="pkg-row"><span class="mono">native doom</span><span class="pill" id="pkg-nativedoom">not installed</span></div>
           <div class="muted small">Type <span class="mono">install native doom</span>, then <span class="mono">native doom</span>: DOOM compiled for ConMon, run by ConMon's own CPU at the real 320×200 in 256 colours. ConMon prints the frame rate when you press F12. Needs 64 MB of RAM.</div>
           <div class="pkg-row"><span class="mono">doomy</span><span class="pill" id="pkg-doomy">not installed</span></div>
@@ -459,7 +459,7 @@
   <footer class="wrap footer">ConMon Lab · <a href="/">home</a></footer>
 
   <script src="/v86/libv86.js"></script>
-  <script src="/kernel/hostlink.js?v=4"></script>
-  <script src="/kernel/kernel.js?v=3"></script>
+  <script src="/kernel/hostlink.js?v=5"></script>
+  <script src="/kernel/kernel.js?v=5"></script>
 </body>
 </html>

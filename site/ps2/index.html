@@ -38,6 +38,16 @@
     pre#log { max-height: 220px; overflow: auto; background: #05070a; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: 12px/1.4 var(--mono); white-space: pre-wrap; }
     kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
     a { color: var(--accent); }
+    .quit { display: none; }
+    /* Inside Kernel Lab, in place of ConMon's screen: just the game, its pad and a way back. */
+    body.embed { background: #000; }
+    body.embed header, body.embed main > p, body.embed details, body.embed #need, body.embed .row { display: none; }
+    body.embed main { padding: 0; max-width: none; }
+    body.embed .screen { border: 0; border-radius: 0; }
+    body.embed .quit { display: block; position: absolute; top: 6px; right: 6px; z-index: 5; font: 600 12px system-ui; padding: 6px 10px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.55); color: #e6edf3; cursor: pointer; }
+    body.embed .pad { margin: 8px 0 0; gap: 6px; }
+    body.embed .pad button { padding: 11px 2px; }
   </style>
 </head>
 <body>
@@ -45,6 +55,7 @@
   <main>
     <div class="screen">
       <canvas id="outputCanvas" width="640" height="480" tabindex="0"></canvas>
+      <button class="quit" id="quit" type="button">✕ Back to ConMon</button>
       <div class="over" id="over">
         <div class="card">
           <h1 id="title">PS2 game</h1>
@@ -72,6 +83,6 @@
     <p class="small muted">Emulator: <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a> by Jean-Philip Desjardins (BSD-2-Clause), compiled to WebAssembly. <span id="credit"></span> PS2 emulation is heavy: a recent computer runs it best; phones are slow.</p>
     <details><summary>Emulator log</summary><pre id="log"></pre></details>
   </main>
-  <script type="module" src="ps2.js?v=5"></script>
+  <script type="module" src="ps2.js?v=6"></script>
 </body>
 </html>

@@ -285,8 +285,9 @@ void cmd_meteo(Shell &sh, const Args &a) {
 // A game the host runs: ConMon sends raw key presses and releases out of the
 // serial port and draws the full-screen frames the host sends back ('A'
 // packets, half-block "pixels"). F12 returns to the shell.
-void play_hosted_game(const char *name, const char *start, const char *keys_msg, const char *stop) {
-    hostlink_send(start, "");
+void play_hosted_game(const char *name, const char *start, const char *keys_msg, const char *stop,
+                      const char *arg = "") {
+    hostlink_send(start, arg);
     keyboard_set_raw(1);
     vga_cursor_visible(0);
     bool drew = false, ended = false;
@@ -340,9 +341,13 @@ void play_hosted_game(const char *name, const char *start, const char *keys_msg,
     else kprintf("Back in ConMon. Type %s to play again.\n", name);
 }
 
-void cmd_doom(Shell &, const Args &) {
+// doom: half-block pixels.  doom ascii: the same game drawn in ASCII art,
+// one character per text cell, its density following the brightness.
+void cmd_doom(Shell &, const Args &a) {
+    bool ascii = a.count() > 1 && lower(a[1]) == "ascii";
+    if (a.count() > 1 && !ascii) { error("Usage: doom [ascii]"); return; }
     if (!host_available()) { no_host(); return; }
-    play_hosted_game("doom", "doom.start", "doom.k", "doom.stop");
+    play_hosted_game(ascii ? "doom ascii" : "doom", "doom.start", "doom.k", "doom.stop", ascii ? "ascii" : "");
 }
 
 void cmd_doomy(Shell &, const Args &) {
@@ -457,14 +462,14 @@ void cmd_install(Shell &sh, const Args &a) {
         if (!host_job(sh, "pkg.install", "doom")) return;
         doom_installed = true;
         if (!sh.has("doom"))
-            sh.add(new FnCommand("doom", "doom", "play DOOM (doom package; F12 quits)", cmd_doom));
+            sh.add(new FnCommand("doom", "doom [ascii]", "play DOOM, or DOOM in ASCII art (F12 quits)", cmd_doom));
         {
             Color c(VGA_LIGHT_GREEN);
             print("Installed doom. ");
         }
         print("New command: doom. Controls:\n");
         doom_controls();
-        print("Type doom to play.\n");
+        print("Type doom to play, or doom ascii for DOOM drawn in ASCII characters.\n");
         return;
     }
 
