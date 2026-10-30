@@ -19,11 +19,11 @@
 
     <div class="pad" id="pad">
       <div class="arrows" aria-label="Move and turn">
-        <button type="button" data-key="comma">⇤<small>STRAFE</small></button>
-        <button type="button" data-key="up">▲<small>GO</small></button>
-        <button type="button" data-key="period">⇥<small>STRAFE</small></button>
+        <button type="button" data-key="a">⇤<small>STRAFE</small></button>
+        <button type="button" data-key="w up">▲<small>GO</small></button>
+        <button type="button" data-key="d">⇥<small>STRAFE</small></button>
         <button type="button" data-key="left">◀<small>TURN</small></button>
-        <button type="button" data-key="down">▼<small>BACK</small></button>
+        <button type="button" data-key="s down">▼<small>BACK</small></button>
         <button type="button" data-key="right">▶<small>TURN</small></button>
       </div>
       <div class="row">
@@ -33,6 +33,7 @@
         <button type="button" data-key="tab" data-mode="tap">Map</button>
         <button type="button" class="cheat" id="cheat">Complete level</button>
         <button type="button" class="cheat" id="cheatVisual">Complete Level (Visual)</button>
+        <button type="button" class="cheat" id="autoBot">Auto bot</button>
       </div>
       <div class="btns">
         <button type="button" data-key="space">Use</button>
@@ -192,12 +193,25 @@
   function sweepStop(){
     if(!sweep) return;
     sweep.stop=true; clearTimeout(sweep.t);
-    ['ctrl','up','left','right','comma','period'].forEach(function(k){ TouchKit.release(k); });
+    ['ctrl','w','left','right','a','d'].forEach(function(k){ TouchKit.release(k); });
     $('bot').hidden=true; $('cheatVisual').classList.remove('on'); sweep=null;
   }
   function wait(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+  var autoDoom=false;
+  $('autoBot').addEventListener('click',async function(){
+    if(autoDoom){ autoDoom=false; this.classList.remove('on'); sweepStop(); toast('Auto bot off'); return; }
+    if(!running){ toast('Start a game first'); return; }
+    autoDoom=true; this.classList.add('on'); toast('Auto bot on (scripted): it keeps playing level after level');
+    while(autoDoom){
+      if(!sweep) $('cheatVisual').click();
+      await wait(1000);
+      while(autoDoom&&sweep) await wait(500);
+      if(autoDoom) await wait(2500);
+      if(nextLevel()===null){ autoDoom=false; $('autoBot').classList.remove('on'); toast('That was the last level'); }
+    }
+  });
   $('cheatVisual').addEventListener('click',async function(){
-    if(sweep){ sweepStop(); toast('Autopilot off'); return; }
+    if(sweep){ autoDoom=false; $('autoBot').classList.remove('on'); sweepStop(); toast('Autopilot off'); return; }
     if(!running){ toast('Start a game first'); return; }
     var me=sweep={stop:false}; this.classList.add('on'); var chip=$('bot'); chip.hidden=false;
     chip.textContent='Autopilot · invincible, all weapons';
@@ -207,10 +221,10 @@
     while(!me.stop&&Date.now()<end){
       var left=Math.ceil((end-Date.now())/1000);
       chip.textContent='Autopilot · scripted run-and-gun · '+left+' s';
-      TouchKit.press('up'); await wait(700+Math.random()*700); TouchKit.release('up');
+      TouchKit.press('w'); await wait(700+Math.random()*700); TouchKit.release('w');
       if(me.stop) break;
       var turn=Math.random()<0.5?'left':'right'; TouchKit.press(turn); await wait(250+Math.random()*450); TouchKit.release(turn);
-      if(Math.random()<0.35){ var st=Math.random()<0.5?['comma','period'][0]:['comma','period'][1]; TouchKit.press(st); await wait(400); TouchKit.release(st); }
+      if(Math.random()<0.35){ var st=Math.random()<0.5?'a':'d'; TouchKit.press(st); await wait(400); TouchKit.release(st); }
     }
     TouchKit.release('ctrl');
     if(me.stop) return;

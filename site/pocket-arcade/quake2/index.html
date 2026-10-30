@@ -41,6 +41,7 @@
         <button type="button" data-key="tab" data-mode="tap">Items</button>
         <button type="button" class="cheat" id="cheat">Complete level</button>
         <button type="button" class="cheat" id="cheatVisual">Complete Level (Visual)</button>
+        <button type="button" class="cheat" id="autoBot">Auto bot</button>
       </div>
       <div class="arrows" aria-label="Move and turn">
         <button type="button" data-key="a">⇤<small>STRAFE</small></button>
@@ -51,10 +52,10 @@
         <button type="button" data-key="right">▶<small>TURN</small></button>
       </div>
       <div class="btns">
-        <button type="button" data-key="pgup">Look ▲</button>
+        <button type="button" data-key="f">Look ▲</button>
         <button type="button" data-key="space">Jump</button>
         <button type="button" class="fire" data-key="ctrl">Fire</button>
-        <button type="button" data-key="pgdn">Look ▼</button>
+        <button type="button" data-key="v">Look ▼</button>
         <button type="button" data-key="c">Duck</button>
       </div>
       <span class="portrait-hint">Turn your phone sideways</span>
@@ -155,6 +156,7 @@
     var vp=viewport(), hasFull=paks.some(function(p){return p.data.length===183997730});
     window.Module={
       canvas:canvas,
+      attachGameAPI:function(imports,exportsPtr){ window.__q2game=exportsPtr; },
       print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); var tt=String(t).replace(/[\x00-\x1f]/g,'').trim(); if(/^-=+-$/.test(tt)) expectTitle=true; else if(expectTitle&&tt){ currentTitle=tt; expectTitle=false; } if(!menuShown&&/client_connect/.test(t)){ menuShown=true; setTimeout(function(){ TouchKit.tap('space',150); },1800); } },
       printErr:function(t){ write(t); },
       setStatus:function(t){ if(t) status.textContent=t; },
@@ -259,39 +261,115 @@
   $('cheat').addEventListener('click',completeLevel);
   async function consoleCmd(text){ await TouchKit.tapAsync('backquote',120); await TouchKit.typeText(text,45); await TouchKit.tapAsync('enter',120); await TouchKit.tapAsync('backquote',120); }
 
-  /* Cheat: Complete Level (Visual). This engine does not reveal where monsters or the exit are,
-     so the autopilot is a scripted run-and-gun: invincible, all weapons, firing while it sweeps
-     the area, then it finishes the level with the warp above. */
-  var sweep=null;
-  function sweepStop(){
-    if(!sweep) return;
-    sweep.stop=true; clearTimeout(sweep.t);
-    ['ctrl','w','left','right','a','d'].forEach(function(k){ TouchKit.release(k); });
-    $('bot').hidden=true; $('cheatVisual').classList.remove('on'); sweep=null;
-  }
+  /* ---------- Autopilot ----------
+     The engine hands the page its game API (Module.attachGameAPI), so the bot can read the real
+     entity table: monster positions, health and the level exit. It steers with the same keys as
+     the arrow pad, flies with noclip, shoots what it faces and finally steps into the exit.
+     Layout of this build's edict_t, checked at runtime: s.origin 4, client 84, inuse 88,
+     absmin 212, absmax 224, classname 280, target 296, targetname 300, health 480, deadflag 492. */
   function wait(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
-  $('cheatVisual').addEventListener('click',async function(){
-    if(sweep){ sweepStop(); toast('Autopilot off'); return; }
-    if(!!!currentTitle){ toast('Start a game first'); return; }
-    var me=sweep={stop:false}; this.classList.add('on'); var chip=$('bot'); chip.hidden=false;
-    chip.textContent='Autopilot · invincible, all weapons';
-    await consoleCmd('god'); await consoleCmd('give all');
-    var end=Date.now()+15000;
-    TouchKit.press('ctrl');
-    while(!me.stop&&Date.now()<end){
-      var left=Math.ceil((end-Date.now())/1000);
-      chip.textContent='Autopilot · scripted run-and-gun · '+left+' s';
-      TouchKit.press('w'); await wait(700+Math.random()*700); TouchKit.release('w');
-      if(me.stop) break;
-      var turn=Math.random()<0.5?'left':'right'; TouchKit.press(turn); await wait(250+Math.random()*450); TouchKit.release(turn);
-      if(Math.random()<0.35){ var st=Math.random()<0.5?['a','d'][0]:['a','d'][1]; TouchKit.press(st); await wait(400); TouchKit.release(st); }
+  var E={origin:4,client:84,inuse:88,absmin:212,absmax:224,classname:280,target:296,targetname:300,health:480,deadflag:492};
+  function mem(){ return {i:window.HEAP32,f:window.HEAPF32,u:window.HEAPU8}; }
+  function cstr(m,p){ if(!(p>0)||p>=m.u.length) return ''; var s=''; for(var k=0;k<64;k++){ var c=m.u[p+k]; if(!c) break; s+=String.fromCharCode(c); } return s; }
+  function world(){
+    var g=window.__q2game, m=mem(); if(!g||!m.i) return null;
+    var base=m.i[(g+64)>>2], size=m.i[(g+68)>>2], num=m.i[(g+72)>>2];
+    if(!base||size<600||size>2000||num<2) return null;
+    if(cstr(m,m.i[(base+E.classname)>>2])!=='worldspawn') return null;     // layout check
+    return {m:m,base:base,size:size,num:num};
+  }
+  function ent(w,n){ var a=w.base+n*w.size, m=w.m; return {
+    a:a, inuse:m.i[(a+E.inuse)>>2], cls:cstr(m,m.i[(a+E.classname)>>2]),
+    org:[m.f[(a+4)>>2],m.f[(a+8)>>2],m.f[(a+12)>>2]],
+    mn:[m.f[(a+E.absmin)>>2],m.f[(a+E.absmin+4)>>2],m.f[(a+E.absmin+8)>>2]],
+    mx:[m.f[(a+E.absmax)>>2],m.f[(a+E.absmax+4)>>2],m.f[(a+E.absmax+8)>>2]],
+    health:m.i[(a+E.health)>>2], dead:m.i[(a+E.deadflag)>>2] }; }
+  function centerOf(e){ return [(e.mn[0]+e.mx[0])/2,(e.mn[1]+e.mx[1])/2,(e.mn[2]+e.mx[2])/2]; }
+  function exitBox(w){
+    var names=[], m=w.m;
+    for(var n=1;n<w.num;n++){ var a=w.base+n*w.size; if(!m.i[(a+E.inuse)>>2]) continue;
+      if(cstr(m,m.i[(a+E.classname)>>2])==='target_changelevel'){ var tn=cstr(m,m.i[(a+E.targetname)>>2]); if(tn) names.push(tn); } }
+    for(var k=1;k<w.num;k++){ var b=w.base+k*w.size; if(!m.i[(b+E.inuse)>>2]) continue;
+      var c=cstr(m,m.i[(b+E.classname)>>2]); if(c.indexOf('trigger_')!==0) continue;
+      if(names.indexOf(cstr(m,m.i[(b+E.target)>>2]))>=0) return ent(w,k); }
+    return null;
+  }
+  function angleDiff(a,b){ var d=(a-b)%360; if(d>180) d-=360; if(d<-180) d+=360; return d; }
+
+  var bot=null, BOT_KEYS=['w','left','right','f','v','ctrl','space','c'];
+  function releaseAll(){ BOT_KEYS.forEach(function(k){ TouchKit.release(k); }); }
+  function key(k,on){ if(on) TouchKit.press(k); else TouchKit.release(k); }
+  function botStop(msg){
+    if(!bot) return; var b=bot; bot=null; b.stop=true; clearInterval(b.timer); releaseAll();
+    $('bot').hidden=true; $('cheatVisual').classList.remove('on'); $('autoBot').classList.remove('on');
+    if(msg) toast(msg);
+  }
+  async function noclip(on){ if(!bot||bot.noclip===on) return; releaseAll(); bot.busy=true; await consoleCmd('noclip'); if(bot){ bot.noclip=on; bot.busy=false; } }
+  async function botStart(continuous){
+    if(!currentTitle){ toast('Start a game first'); return; }
+    var w=world();
+    if(!w){ toast('Autopilot can’t read this game, using the level warp'); await completeLevel(); return; }
+    var title=currentTitle;
+    bot={continuous:continuous,title:title,noclip:false,busy:true,target:null,since:0,start:Date.now(),skip:[]};
+    (continuous?$('autoBot'):$('cheatVisual')).classList.add('on'); $('bot').hidden=false;
+    $('bot').textContent='Autopilot · invincible, all weapons';
+    await consoleCmd('god'); if(!bot) return; await consoleCmd('give all'); if(!bot) return; await consoleCmd('use chaingun'); if(!bot) return;
+    bot.busy=false; await noclip(true);
+    if(bot) bot.timer=setInterval(botTick,50);
+  }
+  function botTick(){
+    var b=bot; if(!b||b.busy) return;
+    if(currentTitle!==b.title){                       // a new level has loaded
+      var cont=b.continuous; botStop();
+      if(cont) setTimeout(function(){ botStart(true); },2500);
+      return;
     }
-    TouchKit.release('ctrl');
-    if(me.stop) return;
-    chip.textContent='Autopilot · level complete!';
-    await completeLevel();
-    sweepStop();
-  });
+    var w=world(); if(!w) return;
+    var me=ent(w,1), cl=w.m.i[(me.a+E.client)>>2]; if(!cl) return;
+    var yaw=w.m.f[(cl+32)>>2], pitch=w.m.f[(cl+28)>>2]; if(pitch>180) pitch-=360;
+    var eye=[me.org[0],me.org[1],me.org[2]+22];
+    var monsters=[];
+    for(var n=2;n<w.num;n++){ var e=ent(w,n);
+      if(e.inuse&&e.cls.indexOf('monster_')===0&&e.health>0&&!e.dead&&b.skip.indexOf(e.a)<0) monsters.push(e); }
+    var timeUp=Date.now()-b.start>100000;
+    if(b.target){ var t=ent(w,b.target.n); if(!t.inuse||t.health<=0||t.dead) b.target=null; else if(Date.now()-b.since>9000){ b.skip.push(t.a); b.target=null; } }
+    if(!b.target&&monsters.length&&!timeUp){
+      monsters.sort(function(x,y){ var dx=centerOf(x), dy=centerOf(y); return Math.hypot(dx[0]-eye[0],dx[1]-eye[1],dx[2]-eye[2])-Math.hypot(dy[0]-eye[0],dy[1]-eye[1],dy[2]-eye[2]); });
+      b.target={n:(monsters[0].a-w.base)/w.size}; b.since=Date.now();
+    }
+    var goal, hunting=false, exit=null;
+    if(b.target){ goal=centerOf(ent(w,b.target.n)); hunting=true; }
+    else { exit=exitBox(w); if(!exit){ botStop(); completeLevel(); return; } goal=centerOf(exit); }
+    var dx=goal[0]-eye[0], dy=goal[1]-eye[1], dz=goal[2]-eye[2], flat=Math.hypot(dx,dy), d=Math.hypot(flat,dz);
+    var wantYaw=Math.atan2(dy,dx)*180/Math.PI, wantPitch=hunting?-Math.atan2(dz,flat)*180/Math.PI:0;
+    var ey=angleDiff(wantYaw,yaw), ep=wantPitch-pitch;
+    key('left',ey>7); key('right',ey<-7);
+    key('v',ep>6); key('f',ep<-6);
+    if(hunting){
+      $('bot').textContent='Autopilot · hunting '+ent(w,b.target.n).cls.replace('monster_','')+' · '+monsters.length+' left';
+      key('w',d>170&&Math.abs(ey)<40);
+      key('ctrl',d<700&&Math.abs(ey)<22&&Math.abs(ep)<22);
+      key('space',false); key('c',false);
+    } else {
+      $('bot').textContent='Autopilot · heading for the exit';
+      key('ctrl',false);
+      var o=me.org, inside=o[0]>exit.mn[0]-8&&o[0]<exit.mx[0]+8&&o[1]>exit.mn[1]-8&&o[1]<exit.mx[1]+8&&o[2]>exit.mn[2]-24&&o[2]<exit.mx[2]+24;
+      if(!inside){
+        key('w',flat>24&&Math.abs(ey)<30);
+        key('space',dz>16); key('c',dz<-16);
+        b.inside=0;
+      } else {
+        key('w',false); key('space',false); key('c',false);
+        if(b.noclip){ noclip(false); }                       // solid again so the trigger fires
+        b.inside=b.inside||Date.now();
+        if(Date.now()-b.inside>3000){ botStop(); completeLevel(); return; }
+      }
+    }
+  }
+  window.__q2dbg=function(){ var w=world(); if(!w) return null; var me=ent(w,1), cl=w.m.i[(me.a+E.client)>>2], x=exitBox(w);
+    return {org:me.org.map(Math.round), yaw:Math.round(w.m.f[(cl+32)>>2]), pitch:Math.round(w.m.f[(cl+28)>>2]), exit:x&&{mn:x.mn.map(Math.round),mx:x.mx.map(Math.round),cls:x.cls}, noclip:bot&&bot.noclip, busy:bot&&bot.busy}; };
+  $('cheatVisual').addEventListener('click',function(){ if(bot){ botStop('Autopilot off'); return; } botStart(false); });
+  $('autoBot').addEventListener('click',function(){ if(bot){ botStop('Auto bot off'); return; } botStart(true); toast('Auto bot on: it keeps playing level after level'); });
 
   addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','F1'].indexOf(e.key)>=0) e.preventDefault(); });
 })();

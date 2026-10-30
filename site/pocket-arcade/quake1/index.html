@@ -44,6 +44,7 @@
         <button type="button" id="wpn">Weapon</button>
         <button type="button" class="cheat" id="cheat">Complete level</button>
         <button type="button" class="cheat" id="cheatVisual">Complete Level (Visual)</button>
+        <button type="button" class="cheat" id="autoBot">Auto bot</button>
       </div>
       <div class="arrows" aria-label="Move and turn">
         <button type="button" data-key="comma">⇤<small>STRAFE</small></button>
@@ -487,12 +488,27 @@ void main(void)
 
   $('back').addEventListener('click',function(){ stopBot(); if(window.parent!==window) window.parent.postMessage({pocketArcade:'close'},'*'); else history.back(); });
 
-  // Keep the engine's own error dialogs from blocking the page.
+  // Keep the engine's own error dialogs from blocking the page, and show any crash on screen.
   window.alert=function(m){ fail(m); };
+  var booted=false;
+  function report(msg){
+    write(msg);
+    if(!booted){ fail(msg); return; }
+    toast('Error: '+String(msg).slice(0,80));
+  }
+  window.addEventListener('error',function(e){ report((e&&e.message?e.message:'Script error')+(e&&e.filename?' ('+e.filename.split('/').pop()+':'+e.lineno+')':'')); });
+  window.addEventListener('unhandledrejection',function(e){ var r=e&&e.reason; if(r&&/play\(\)|NotAllowedError|AbortError/.test(String(r))) return; report('Unhandled: '+(r&&r.message?r.message:String(r))); });
+  SCR.maxPixelRatio=touch?1.25:2;
 
   // Remember which map the server is running.
   var spawn=SV.SpawnServer;
-  SV.SpawnServer=function(server){ currentMap=String(server).toLowerCase(); stopBot(); return spawn.apply(this,arguments); };
+  var autoMode=false;
+  SV.SpawnServer=function(server){
+    currentMap=String(server).toLowerCase(); stopBot();
+    var r=spawn.apply(this,arguments);
+    if(autoMode) setTimeout(function(){ if(autoMode&&!bot&&inGame()) startBot(); },3000);
+    return r;
+  };
 
   $('play').addEventListener('click',async function(){
     if(started) return; started=true; this.disabled=true; this.textContent='Loading…'; $('dl').classList.remove('err');
@@ -507,7 +523,8 @@ void main(void)
       progress(1,'Starting…');
       $('gate').hidden=true; $('shell').classList.add('playing');
       if(touch) $('pad').hidden=false;
-      Sys.Start();
+      try{ Sys.Start(); }catch(e){ fail(e); return; }
+      setTimeout(function(){ booted=true; },4000);
       status.textContent='Playing';
       setTimeout(function(){ try{ if(Key.dest.value!==Key.dest.menu) Cmd.ExecuteString('togglemenu'); }catch(e){} },2500);
     }catch(e){ fail(e); }
@@ -551,11 +568,21 @@ void main(void)
     try{ Object.keys(bot.held).forEach(function(k){ if(bot.held[k]) Cmd.ExecuteString('-'+k); }); }catch(e){}
     try{ if(bot.noclip) Cmd.ExecuteString('noclip'); }catch(e){}
     try{ if(bot.speed) Cvar.SetValue('cl_forwardspeed',bot.speed); }catch(e){}
-    bot=null; $('bot').hidden=true; $('cheatVisual').classList.remove('on');
+    bot=null; $('bot').hidden=autoMode?false:true; $('cheatVisual').classList.remove('on');
+    if(autoMode) $('bot').textContent='Auto bot · waiting for the next level';
   }
   function setNoclip(on){ if(bot.noclip===on) return; bot.noclip=on; Cmd.ExecuteString('noclip'); }
   $('cheatVisual').addEventListener('click',function(){
-    if(bot){ stopBot(); toast('Autopilot off'); return; }
+    if(bot){ autoMode=false; $('autoBot').classList.remove('on'); stopBot(); toast('Autopilot off'); return; }
+    startBot();
+  });
+  $('autoBot').addEventListener('click',function(){
+    if(autoMode){ autoMode=false; this.classList.remove('on'); stopBot(); toast('Auto bot off'); return; }
+    if(!inGame()){ toast('Start a game first'); return; }
+    autoMode=true; this.classList.add('on'); toast('Auto bot on: it keeps playing level after level');
+    if(!bot) startBot();
+  });
+  function startBot(){
     if(!inGame()){ toast('Start a game first'); return; }
     var exit=null;
     edicts().forEach(function(e){ if(!exit&&cls(e)==='trigger_changelevel') exit=e; });
@@ -567,7 +594,7 @@ void main(void)
     try{ bot.speed=CL.forwardspeed.value; Cvar.SetValue('cl_forwardspeed',420); }catch(e){}
     setNoclip(true);
     bot.timer=setInterval(tick,50);
-  });
+  }
   function tick(){
     if(!bot) return;
     if(!inGame()||currentMap!==bot.map){ stopBot(); return; }

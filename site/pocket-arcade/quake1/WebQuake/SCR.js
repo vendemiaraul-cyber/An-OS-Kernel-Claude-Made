@@ -286,7 +286,7 @@ SCR.UpdateScreen = function()
 	var height = (elem.clientHeight <= 200) ? 200 : elem.clientHeight;
 	var pixelRatio;
 	if (window.devicePixelRatio >= 1.0)
-		pixelRatio = window.devicePixelRatio;
+		pixelRatio = Math.min(window.devicePixelRatio, SCR.maxPixelRatio || 1.5);   // Pocket Arcade: cap for phones
 	else
 		pixelRatio = 1.0;
 	if ((VID.width !== width) || (VID.height !== height) || (SCR.devicePixelRatio !== pixelRatio) || (Host.framecount === 0))
