@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Quake Shareware</title>
+<link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Rubik:wght@400;500&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../kit/player.css">
+<style>
+  /* WebQuake draws into a fixed full-window canvas */
+  #mainwindow{position:fixed;left:0;top:0;display:none;pointer-events:none}
+  #progress,#end{display:none}
+  .shell{z-index:5;pointer-events:none}
+  .shell .bar,.shell .gate,.shell .pad,.shell .toast{pointer-events:auto}
+  .shell.playing .bar{position:absolute;left:0;top:0;padding-top:calc(8px + env(safe-area-inset-top,0px));padding-left:calc(12px + env(safe-area-inset-left,0px));background:none}
+  .shell.playing .bar h1,.shell.playing .bar .status{display:none}
+  .shell.playing .stage{background:transparent}
+  .row{left:calc(110px + env(safe-area-inset-left,0px));right:auto;flex-wrap:wrap;max-width:calc(100% - 130px)}
+  .btns{grid-template-columns:repeat(3,58px)}
+  .btns button{width:58px;height:58px}
+  .btns button.fire{grid-column:3;grid-row:1/span 2;width:58px;height:126px;border-radius:29px}
+  .choices{display:flex;flex-direction:column;gap:8px}
+  .bot{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:6;font:500 12px var(--mono);background:rgba(11,10,16,.85);border:1px solid #7fe0a0;color:#7fe0a0;padding:6px 12px;border-radius:99px;pointer-events:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<span id="progress"></span>
+<div id="end"><span id="end1" style="display:none">Thanks for playing Quake.</span><span id="end2" style="display:none">Thanks for playing Quake.</span></div>
+<canvas id="mainwindow"></canvas>
+<img id="loading" alt="Loading" style="display:none;position:fixed">
+<div class="shell" id="shell">
+  <div class="bar">
+    <button class="chipbtn" id="back" type="button">‹ Arcade</button>
+    <h1>Quake</h1>
+    <span class="status" id="status">Getting ready…</span>
+  </div>
+  <div class="stage" id="stage">
+    <div class="pad" id="pad" hidden>
+      <div class="row">
+        <button type="button" data-key="esc" data-mode="tap">Menu</button>
+        <button type="button" data-key="up" data-mode="tap">▲</button>
+        <button type="button" data-key="down" data-mode="tap">▼</button>
+        <button type="button" data-key="enter" data-mode="tap">Enter</button>
+        <button type="button" id="wpn">Weapon</button>
+        <button type="button" class="cheat" id="cheat">Complete level</button>
+        <button type="button" class="cheat" id="cheatVisual">Complete Level (Visual)</button>
+      </div>
+      <div class="arrows" aria-label="Move and turn">
+        <button type="button" data-key="comma">⇤<small>STRAFE</small></button>
+        <button type="button" data-key="up">▲<small>GO</small></button>
+        <button type="button" data-key="period">⇥<small>STRAFE</small></button>
+        <button type="button" data-key="left">◀<small>TURN</small></button>
+        <button type="button" data-key="down">▼<small>BACK</small></button>
+        <button type="button" data-key="right">▶<small>TURN</small></button>
+      </div>
+      <div class="btns">
+        <button type="button" data-key="pgup">Look ▲</button>
+        <button type="button" data-key="space">Jump</button>
+        <button type="button" class="fire" data-key="ctrl">Fire</button>
+        <button type="button" data-key="pgdn">Look ▼</button>
+        <button type="button" data-key="end" data-mode="tap">Center</button>
+      </div>
+      <span class="portrait-hint">Turn your phone sideways</span>
+    </div>
+    <div class="toast" id="toast"></div>
+    <div class="bot" id="bot" hidden></div>
+
+    <div class="gate" id="gate">
+      <div class="card">
+        <h2>Quake</h2>
+        <p>The original 1996 shooter on WebQuake, a JavaScript port of the Quake engine. Plays the shareware episode, Dimension of the Doomed: 8 levels.</p>
+        <div class="meter"><i id="meter"></i></div>
+        <p class="small" id="dl">Unpacked here from id Software’s original 1996 shareware archive (8.7 MB download).</p>
+        <button class="bigbtn" id="play" type="button">▶ Play!</button>
+        <p class="small">Touch: arrow buttons move, turn and strafe, Look ▲▼ aims, then Fire and Jump. Complete Level (Visual) turns on an autopilot that hunts the monsters and walks into the exit.</p>
+        <pre class="log" id="log" hidden></pre>
+        <p class="small">Engine: <a href="https://github.com/Triang3l/WebQuake" target="_blank" rel="noopener">WebQuake</a> by Triang3l, GPL-2.0 (<a href="LICENSE-GPL.md" target="_blank">licence</a>). Shareware Quake is served as id Software’s unmodified <a href="../originals/quake106.zip">quake106.zip</a>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="x-shader/x-vertex" id="vshAlias">
+uniform vec3 uOrigin;
+uniform mat3 uAngles;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+uniform vec3 uLightVec;
+attribute vec3 aPosition;
+attribute vec3 aNormal;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+varying float vLightDot;
+void main(void)
+{
+	vec3 position = uViewAngles * (uAngles * aPosition + uOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aTexCoord;
+	vLightDot = dot(aNormal, uLightVec);
+}
+</script>
+<script type="x-shader/x-fragment" id="fshAlias">
+precision mediump float;
+uniform float uGamma;
+uniform float uAmbientLight;
+uniform float uShadeLight;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+varying float vLightDot;
+void main(void)
+{
+	vec4 texture = texture2D(tTexture, vTexCoord);
+	gl_FragColor = vec4(texture.rgb * mix(1.0, vLightDot * uShadeLight + uAmbientLight, texture.a), 1.0);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshBrush">
+uniform vec3 uOrigin;
+uniform mat3 uAngles;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+attribute vec3 aPosition;
+attribute vec4 aTexCoord;
+attribute vec4 aLightStyle;
+varying vec4 vTexCoord;
+varying vec4 vLightStyle;
+void main(void)
+{
+	vec3 position = uViewAngles * (uAngles * aPosition + uOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aTexCoord;
+	vLightStyle = aLightStyle;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshBrush">
+precision mediump float;
+uniform float uGamma;
+uniform sampler2D tTexture;
+uniform sampler2D tLightmap;
+uniform sampler2D tDlight;
+uniform sampler2D tLightStyle;
+varying vec4 vTexCoord;
+varying vec4 vLightStyle;
+void main(void)
+{
+	vec4 texture = texture2D(tTexture, vTexCoord.xy);
+	gl_FragColor = vec4(texture.rgb *
+		mix(1.0, dot(texture2D(tLightmap, vTexCoord.zw), vec4(
+			texture2D(tLightStyle, vec2(vLightStyle.x, 0.0)).a,
+			texture2D(tLightStyle, vec2(vLightStyle.y, 0.0)).a,
+			texture2D(tLightStyle, vec2(vLightStyle.z, 0.0)).a,
+			texture2D(tLightStyle, vec2(vLightStyle.w, 0.0)).a)
+		* 43.828125) + texture2D(tDlight, vTexCoord.zw).a, texture.a), 1.0);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshCharacter">
+uniform vec2 uCharacter;
+uniform vec2 uDest;
+uniform mat4 uOrtho;
+attribute vec2 aPosition;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_Position = uOrtho * vec4(aPosition * 8.0 + uDest, 0.0, 1.0);
+	vTexCoord = (aPosition + uCharacter) * 0.0625;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshCharacter">
+precision mediump float;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_FragColor = texture2D(tTexture, vTexCoord);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshDlight">
+uniform vec3 uOrigin;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+uniform float uRadius;
+attribute vec3 aPosition;
+varying float vAlpha;
+void main(void)
+{
+	vec3 position = aPosition * 0.35 * uRadius + uViewAngles * (uOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vAlpha = aPosition.y * -0.2;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshDlight">
+precision mediump float;
+uniform float uGamma;
+varying float vAlpha;
+void main(void)
+{
+	gl_FragColor = vec4(pow(1.0, uGamma), pow(0.5, uGamma), 0.0, vAlpha);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshFill">
+uniform mat4 uOrtho;
+attribute vec2 aPosition;
+attribute vec4 aColor;
+varying vec4 vColor;
+void main(void)
+{
+	gl_Position = uOrtho * vec4(aPosition, 0.0, 1.0);
+	vColor = aColor;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshFill">
+precision mediump float;
+varying vec4 vColor;
+void main(void)
+{
+	gl_FragColor = vColor;
+}
+</script>
+<script type="x-shader/x-vertex" id="vshParticle">
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+uniform float uScale;
+attribute vec3 aOrigin;
+attribute vec2 aCoord;
+attribute float aScale;
+attribute vec3 aColor;
+varying vec2 vCoord;
+varying vec3 vColor;
+void main(void)
+{
+	vec2 point = aCoord * aScale;
+	vec3 position = vec3(point.x, 0.0, point.y) + uViewAngles * (aOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vCoord = aCoord;
+	vColor = aColor;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshParticle">
+precision mediump float;
+uniform float uGamma;
+varying vec2 vCoord;
+varying vec3 vColor;
+void main(void)
+{
+	gl_FragColor = vec4(vColor, 1.0 - smoothstep(0.75, 1.0, length(vCoord)));
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshPic">
+uniform mat4 uOrtho;
+attribute vec2 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_Position = uOrtho * vec4(aPosition, 0.0, 1.0);
+	vTexCoord = aTexCoord;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshPic">
+precision mediump float;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_FragColor = texture2D(tTexture, vTexCoord);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshPicTranslate">
+uniform mat4 uOrtho;
+attribute vec2 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_Position = uOrtho * vec4(aPosition, 0.0, 1.0);
+	vTexCoord = aTexCoord;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshPicTranslate">
+precision mediump float;
+uniform vec3 uTop;
+uniform vec3 uBottom;
+uniform sampler2D tTexture;
+uniform sampler2D tTrans;
+varying vec2 vTexCoord;
+void main(void)
+{
+	vec4 texture = texture2D(tTexture, vTexCoord);
+	vec4 trans = texture2D(tTrans, vTexCoord);
+	gl_FragColor = vec4(mix(mix(texture.rgb, uTop * trans.x, trans.y), uBottom * trans.z, trans.w), texture.a);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshPlayer">
+uniform vec3 uOrigin;
+uniform mat3 uAngles;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+uniform vec3 uLightVec;
+attribute vec3 aPosition;
+attribute vec3 aNormal;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+varying float vLightDot;
+void main(void)
+{
+	vec3 position = uViewAngles * (uAngles * aPosition + uOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aTexCoord;
+	vLightDot = dot(aNormal, uLightVec);
+}
+</script>
+<script type="x-shader/x-fragment" id="fshPlayer">
+precision mediump float;
+uniform float uGamma;
+uniform float uAmbientLight;
+uniform float uShadeLight;
+uniform vec3 uTop;
+uniform vec3 uBottom;
+uniform sampler2D tTexture;
+uniform sampler2D tPlayer;
+varying vec2 vTexCoord;
+varying float vLightDot;
+void main(void)
+{
+	vec4 texture = texture2D(tTexture, vTexCoord);
+	vec4 player = texture2D(tPlayer, vTexCoord);
+	gl_FragColor = vec4(
+		mix(mix(texture.rgb, uTop * (1.0 / 191.25) * player.x, player.y), uBottom * (1.0 / 191.25) * player.z, player.w)
+		* mix(1.0, vLightDot * uShadeLight + uAmbientLight, texture.a), 1.0);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshSky">
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+uniform vec3 uScale;
+attribute vec3 aPosition;
+varying vec2 vTexCoord;
+void main(void)
+{
+	vec3 position = uViewAngles * (aPosition * uScale * 18918.0);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aPosition.xy * uScale.xy * 1.5;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshSky">
+precision mediump float;
+uniform float uGamma;
+uniform vec2 uTime;
+uniform sampler2D tSolid;
+uniform sampler2D tAlpha;
+varying vec2 vTexCoord;
+void main(void)
+{
+	vec4 alpha = texture2D(tAlpha, vTexCoord + uTime.x);
+	gl_FragColor = vec4(mix(texture2D(tSolid, vTexCoord + uTime.y).rgb, alpha.rgb, alpha.a), 1.0);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshSkyChain">
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+attribute vec3 aPosition;
+void main(void)
+{
+	vec3 position = uViewAngles * (aPosition - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+}
+</script>
+<script type="x-shader/x-fragment" id="fshSkyChain">
+precision mediump float;
+void main(void)
+{
+}
+</script>
+<script type="x-shader/x-vertex" id="vshSprite">
+uniform vec4 uRect;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+attribute vec3 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main(void)
+{
+	vec3 position = uViewAngles * (aPosition - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aTexCoord;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshSprite">
+precision mediump float;
+uniform float uGamma;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_FragColor = texture2D(tTexture, vTexCoord);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshTurbulent">
+uniform vec3 uOrigin;
+uniform mat3 uAngles;
+uniform vec3 uViewOrigin;
+uniform mat3 uViewAngles;
+uniform mat4 uPerspective;
+attribute vec3 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main(void)
+{
+	vec3 position = uViewAngles * (uAngles * aPosition + uOrigin - uViewOrigin);
+	gl_Position = uPerspective * vec4(position.xz, -position.y, 1.0);
+	vTexCoord = aTexCoord;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshTurbulent">
+precision mediump float;
+uniform float uGamma;
+uniform float uTime;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_FragColor = vec4(texture2D(tTexture, vTexCoord + vec2(sin(vTexCoord.t * 3.141593 + uTime), sin(vTexCoord.s * 3.141593 + uTime)) * 0.125).rgb, 1.0);
+	gl_FragColor.r = pow(gl_FragColor.r, uGamma);
+	gl_FragColor.g = pow(gl_FragColor.g, uGamma);
+	gl_FragColor.b = pow(gl_FragColor.b, uGamma);
+}
+</script>
+<script type="x-shader/x-vertex" id="vshWarp">
+uniform mat4 uOrtho;
+attribute vec2 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_Position = uOrtho * vec4(aPosition, 0.0, 1.0);
+	vTexCoord = aTexCoord;
+}
+</script>
+<script type="x-shader/x-fragment" id="fshWarp">
+precision mediump float;
+uniform float uTime;
+uniform sampler2D tTexture;
+varying vec2 vTexCoord;
+void main(void)
+{
+	gl_FragColor = texture2D(tTexture, vTexCoord + vec2(sin(vTexCoord.t * 15.70796 + uTime) * 0.003125, sin(vTexCoord.s * 9.817477 + uTime) * 0.005));
+}
+</script>
+<script src="../kit/touchkit.js"></script>
+<script src="../kit/unzip.js"></script>
+<script src="../kit/lha.js"></script>
+<script src="WebQuake/CDAudio.js"></script> <script src="WebQuake/Chase.js"></script> <script src="WebQuake/CL.js"></script> <script src="WebQuake/Cmd.js"></script> <script src="WebQuake/COM.js"></script> <script src="WebQuake/Console.js"></script> <script src="WebQuake/CRC.js"></script> <script src="WebQuake/Cvar.js"></script> <script src="WebQuake/Def.js"></script> <script src="WebQuake/Draw.js"></script> <script src="WebQuake/ED.js"></script> <script src="WebQuake/GL.js"></script> <script src="WebQuake/Host.js"></script> <script src="WebQuake/IN.js"></script> <script src="WebQuake/Key.js"></script> <script src="WebQuake/M.js"></script> <script src="WebQuake/Mod.js"></script> <script src="WebQuake/MSG.js"></script> <script src="WebQuake/NET.js"></script> <script src="WebQuake/NET_Loop.js"></script> <script src="WebQuake/NET_WEBS.js"></script> <script src="WebQuake/PF.js"></script> <script src="WebQuake/PR.js"></script> <script src="WebQuake/Protocol.js"></script> <script src="WebQuake/Q.js"></script> <script src="WebQuake/R.js"></script> <script src="WebQuake/S.js"></script> <script src="WebQuake/Sbar.js"></script> <script src="WebQuake/SCR.js"></script> <script src="WebQuake/SV.js"></script> <script src="WebQuake/Sys.js"></script> <script src="WebQuake/SZ.js"></script> <script src="WebQuake/V.js"></script> <script src="WebQuake/Vec.js"></script> <script src="WebQuake/VID.js"></script> <script src="WebQuake/W.js"></script>
+<script>
+(function(){
+  'use strict';
+  var $=function(id){return document.getElementById(id)};
+  var status=$('status'), touch=TouchKit.isTouch(), started=false, currentMap=null, lines=[];
+  if(!touch) document.documentElement.classList.add('no-touch');
+  TouchKit.setTarget(window);
+  function write(m){ lines.push(String(m)); if(lines.length>60) lines.shift(); $('log').textContent=lines.join('\n'); }
+  function fail(e){ var m=(e&&e.message)||String(e); status.textContent='Could not start'; $('gate').hidden=false; $('shell').classList.remove('playing'); $('log').hidden=false; write(m); $('dl').textContent=m; $('dl').classList.add('err'); $('play').disabled=false; $('play').textContent='Try again'; started=false; }
+  function progress(p,label){ $('meter').style.width=Math.round(p*100)+'%'; if(label) $('dl').textContent=label; }
+  function toast(msg){ var t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(function(){t.classList.remove('show')},2600); }
+
+  $('back').addEventListener('click',function(){ stopBot(); if(window.parent!==window) window.parent.postMessage({pocketArcade:'close'},'*'); else history.back(); });
+
+  // Keep the engine's own error dialogs from blocking the page.
+  window.alert=function(m){ fail(m); };
+
+  // Remember which map the server is running.
+  var spawn=SV.SpawnServer;
+  SV.SpawnServer=function(server){ currentMap=String(server).toLowerCase(); stopBot(); return spawn.apply(this,arguments); };
+
+  $('play').addEventListener('click',async function(){
+    if(started) return; started=true; this.disabled=true; this.textContent='Loading…'; $('dl').classList.remove('err');
+    try{
+      var zip=await ArcadeZip.download(['../originals/quake106.zip'],9094045,function(p){progress(p*0.6,'Downloading shareware Quake… '+Math.round(p*100)+'%');});
+      progress(0.62,'Unpacking…');
+      var res=await ArcadeZip.extract(zip,'resource.1'); zip=null;
+      progress(0.75,'Unpacking pak0.pak (this takes a few seconds)…');
+      await new Promise(function(r){setTimeout(r,30)});
+      var pak=ArcadeLHA.extract(res,'id1/pak0.pak'); res=null;
+      COM.memFiles['id1/pak0.pak']=pak; COM.memOnly=true;
+      progress(1,'Starting…');
+      $('gate').hidden=true; $('shell').classList.add('playing');
+      if(touch) $('pad').hidden=false;
+      Sys.Start();
+      status.textContent='Playing';
+      setTimeout(function(){ try{ if(Key.dest.value!==Key.dest.menu) Cmd.ExecuteString('togglemenu'); }catch(e){} },2500);
+    }catch(e){ fail(e); }
+  });
+
+  TouchKit.bind($('pad'));
+  $('pad').addEventListener('touchstart',function(e){ if(e.target===this) e.preventDefault(); },{passive:false});
+  $('wpn').addEventListener('pointerdown',function(e){ e.preventDefault(); try{ Cmd.ExecuteString('impulse 10'); }catch(x){} });
+
+  /* ---------- level data from the running server ---------- */
+  function entityBlocks(){ try{ return SV.server.worldmodel.entities.split('}'); }catch(e){ return []; } }
+  function nextMap(){
+    var found=null;
+    entityBlocks().forEach(function(b){
+      if(found||!/"classname"\s+"trigger_changelevel"/.test(b)) return;
+      var m=/"map"\s+"([^"]+)"/.exec(b); if(m) found=m[1].toLowerCase();
+    });
+    return found;
+  }
+  function inGame(){ try{ return SV.server.active===true&&CL.cls.demoplayback!==true; }catch(e){ return false; } }
+
+  /* ---------- Cheat: Complete level ---------- */
+  $('cheat').addEventListener('click',function(){
+    if(!inGame()){ toast('Start a game first'); return; }
+    var n=nextMap(); if(!n){ toast('This level has no exit'); return; }
+    toast('Level complete! Loading '+n.toUpperCase()+'…');
+    Cmd.ExecuteString('changelevel '+n);
+  });
+
+  /* ---------- Cheat: Complete Level (Visual) — an autopilot ---------- */
+  var bot=null; window.__pocketBot=function(){ return bot; };
+  function ev(e,o){ return [e.v_float[o],e.v_float[o+1],e.v_float[o+2]]; }
+  function edicts(){ var out=[]; for(var i=1;i<SV.server.num_edicts;i++){ var e=SV.server.edicts[i]; if(e&&!e.free) out.push(e); } return out; }
+  function cls(e){ return PR.GetString(e.v_int[PR.entvars.classname]); }
+  function center(e){ var a=ev(e,PR.entvars.absmin), b=ev(e,PR.entvars.absmax); return [(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2]; }
+  function dist(a,b){ var x=a[0]-b[0],y=a[1]-b[1],z=a[2]-b[2]; return Math.sqrt(x*x+y*y+z*z); }
+  function hold(cmd,on){ if(bot.held[cmd]===on) return; bot.held[cmd]=on; Cmd.ExecuteString((on?'+':'-')+cmd); }
+  function stopBot(){
+    if(!bot) return;
+    clearInterval(bot.timer);
+    try{ Object.keys(bot.held).forEach(function(k){ if(bot.held[k]) Cmd.ExecuteString('-'+k); }); }catch(e){}
+    try{ if(bot.noclip) Cmd.ExecuteString('noclip'); }catch(e){}
+    try{ if(bot.speed) Cvar.SetValue('cl_forwardspeed',bot.speed); }catch(e){}
+    bot=null; $('bot').hidden=true; $('cheatVisual').classList.remove('on');
+  }
+  function setNoclip(on){ if(bot.noclip===on) return; bot.noclip=on; Cmd.ExecuteString('noclip'); }
+  $('cheatVisual').addEventListener('click',function(){
+    if(bot){ stopBot(); toast('Autopilot off'); return; }
+    if(!inGame()){ toast('Start a game first'); return; }
+    var exit=null;
+    edicts().forEach(function(e){ if(!exit&&cls(e)==='trigger_changelevel') exit=e; });
+    if(!exit){ toast('This level has no exit'); return; }
+    bot={held:{},noclip:false,exit:exit,map:currentMap,target:null,since:Date.now(),start:Date.now()};
+    $('cheatVisual').classList.add('on'); $('bot').hidden=false;
+    Cmd.ExecuteString('god'); Cmd.ExecuteString('give 2'); Cmd.ExecuteString('give 3'); Cmd.ExecuteString('give 4');
+    Cmd.ExecuteString('give 5'); Cmd.ExecuteString('give s 100'); Cmd.ExecuteString('give n 200'); Cmd.ExecuteString('impulse 5');
+    try{ bot.speed=CL.forwardspeed.value; Cvar.SetValue('cl_forwardspeed',420); }catch(e){}
+    setNoclip(true);
+    bot.timer=setInterval(tick,50);
+  });
+  function tick(){
+    if(!bot) return;
+    if(!inGame()||currentMap!==bot.map){ stopBot(); return; }
+    var me=SV.server.edicts[1]; if(!me) return;
+    if(CL.state.intermission){                               // end-of-level stats: press Jump to continue
+      Object.keys(bot.held).forEach(function(k){ if(bot.held[k]) hold(k,false); });
+      $('bot').textContent='Autopilot · level complete!';
+      if(!bot.cont||Date.now()-bot.cont>1500){ bot.cont=Date.now(); Cmd.ExecuteString('+jump'); setTimeout(function(){ try{ Cmd.ExecuteString('-jump'); }catch(e){} },150); }
+      return;
+    }
+    var eye=ev(me,PR.entvars.origin), vo=ev(me,PR.entvars.view_ofs); eye=[eye[0]+vo[0],eye[1]+vo[1],eye[2]+vo[2]];
+    var monsters=edicts().filter(function(e){ return (e.v_float[PR.entvars.flags]&SV.fl.monster)&&e.v_float[PR.entvars.health]>0&&!(bot.skip&&bot.skip.indexOf(e)>=0); });
+    var timeUp=Date.now()-bot.start>90000;
+    // keep the same target for a while; give up on one after 12 s
+    if(bot.target&&(bot.target.free||bot.target.v_float[PR.entvars.health]<=0)) bot.target=null;
+    if(bot.target&&Date.now()-bot.since>8000){ (bot.skip=bot.skip||[]).push(bot.target); bot.target=null; }
+    if(!bot.target&&monsters.length&&!timeUp){
+      monsters.sort(function(a,b){ return dist(center(a),eye)-dist(center(b),eye); });
+      bot.target=monsters[0]; bot.since=Date.now();
+    }
+    var goal, attacking;
+    if(bot.target&&!timeUp){ goal=center(bot.target); attacking=true; }
+    else { goal=center(bot.exit); attacking=false; bot.target=null; }
+    var dx=goal[0]-eye[0], dy=goal[1]-eye[1], dz=goal[2]-eye[2], flat=Math.sqrt(dx*dx+dy*dy), d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    // aim the view at the goal (Quake: pitch down is positive)
+    CL.state.viewangles[1]=Math.atan2(dy,dx)*180/Math.PI;
+    CL.state.viewangles[0]=-Math.atan2(dz,flat)*180/Math.PI;
+    if(attacking){
+      $('bot').textContent='Autopilot · hunting '+cls(bot.target).replace('monster_','')+' · '+monsters.length+' left';
+      setNoclip(true);
+      hold('forward',d>140);
+      hold('attack',d<520);
+    } else {
+      $('bot').textContent='Autopilot · heading for the exit';
+      hold('attack',false);
+      var org=ev(me,PR.entvars.origin), mn=ev(bot.exit,PR.entvars.absmin), mx=ev(bot.exit,PR.entvars.absmax);
+      var gx=goal[0]-org[0], gy=goal[1]-org[1], gz=goal[2]-org[2], gflat=Math.sqrt(gx*gx+gy*gy);
+      if(gflat>8) CL.state.viewangles[1]=Math.atan2(gy,gx)*180/Math.PI;
+      CL.state.viewangles[0]=0;
+      var inside=org[0]>mn[0]-4&&org[0]<mx[0]+4&&org[1]>mn[1]-4&&org[1]<mx[1]+4&&org[2]>mn[2]-4&&org[2]<mx[2]+4;
+      if(!inside){
+        setNoclip(true);
+        hold('forward',gflat>12);
+        hold('movedown',gz<-12); hold('moveup',gz>12);
+        bot.inside=0;
+      } else {
+        hold('forward',false); hold('movedown',false); hold('moveup',false);
+        setNoclip(false);                                   // solid again, so the exit trigger fires
+        bot.inside=bot.inside||Date.now();
+        if(Date.now()-bot.inside>1500){ var n=nextMap(); if(n){ stopBot(); Cmd.ExecuteString('changelevel '+n); return; } }
+      }
+      if(Date.now()-bot.start>120000){ var n2=nextMap(); if(n2){ stopBot(); Cmd.ExecuteString('changelevel '+n2); } }
+    }
+  }
+  addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown'].indexOf(e.key)>=0) e.preventDefault(); });
+})();
+</script>
+</body>
+</html>

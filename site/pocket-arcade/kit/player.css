@@ -61,3 +61,4 @@ pre.log{max-height:120px;overflow:auto;font-family:var(--mono);font-size:10px;co
 .toast{position:absolute;left:50%;top:56px;transform:translateX(-50%);z-index:7;background:rgba(11,10,16,.9);border:1px solid var(--line);color:var(--fg);font:500 12px var(--mono);padding:6px 12px;border-radius:99px;pointer-events:none;opacity:0;transition:opacity .2s}
 .toast.show{opacity:1}
 .no-touch .arrows{display:none}
+.bot{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:6;font:500 12px var(--mono);background:rgba(11,10,16,.85);border:1px solid #7fe0a0;color:#7fe0a0;padding:6px 12px;border-radius:99px;pointer-events:none;white-space:nowrap}

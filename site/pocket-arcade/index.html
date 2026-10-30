@@ -140,14 +140,31 @@ button.btn{font-family:var(--display)}
 
 <div class="wrap">
   <header>
-    <div class="credits">Insert coin · <b>9 games</b> · all run on this site</div>
+    <div class="credits">Insert coin · <b>10 games</b> · all run on this site</div>
     <h1 class="marquee">Pocket<br><span>Arcade</span></h1>
-    <p class="sub">Quake II and DOOM compiled to WebAssembly, an open-world block-building sandbox, a block-stacker of our own and five more open-source games from GitHub. Every one plays right here, with touch controls for iPhone.</p>
+    <p class="sub">Quake, Quake II and DOOM, an open-world block-building sandbox, a block-stacker of our own and five more open-source games from GitHub. Every one plays right here, with touch controls for iPhone.</p>
   </header>
 
   <section>
     <h2>Specials</h2>
     <div class="featured">
+      <article class="cab">
+        <div class="screen"><canvas data-scene="q1"></canvas><span class="engine">WebQuake · JavaScript</span></div>
+        <div class="cab-body">
+          <h3>Quake</h3>
+          <div class="chips"><span class="chip touch">Touch pad</span><span class="chip">Shareware · 8 levels</span><span class="chip">Autopilot</span></div>
+          <p>The 1996 original, running on WebQuake, a JavaScript port of the Quake engine from GitHub. Tap Play! and it unpacks id Software’s shareware release in your browser.</p>
+          <ol class="steps">
+            <li>Tap <b>Play!</b>, then Play! again.</li>
+            <li>Pick Single Player, New Game.</li>
+            <li>Try Complete Level (Visual) to watch the autopilot clear a level.</li>
+          </ol>
+          <div class="actions">
+            <button class="btn play" type="button" data-game="quake1">▶ Play!</button>
+            <a class="btn ghost" href="https://github.com/Triang3l/WebQuake" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </article>
       <article class="cab">
         <div class="screen"><canvas data-scene="q2"></canvas><span class="engine">Qwasm2 · Yamagi Quake II → WASM</span></div>
         <div class="cab-body">
@@ -188,6 +205,12 @@ button.btn{font-family:var(--display)}
   <section>
     <h2>All games</h2>
     <div class="rack">
+      <div class="cart">
+        <div class="top"><h4>Quake</h4><span class="lic">GPL · JS</span></div>
+        <div class="chips"><span class="chip touch">Touch pad</span></div>
+        <p>The 1996 original on WebQuake: the shareware episode, with a real autopilot that hunts monsters and walks into the exit.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="quake1">▶ Play!</button><a class="btn ghost" href="https://github.com/Triang3l/WebQuake" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
       <div class="cart">
         <div class="top"><h4>Quake II</h4><span class="lic">GPL · WASM</span></div>
         <div class="chips"><span class="chip touch">Touch pad</span></div>
@@ -248,7 +271,7 @@ button.btn{font-family:var(--display)}
   <section>
     <h2>Playing on iPhone</h2>
     <div class="notes">
-      <div><h3>No files needed</h3><p>DOOM and Quake II ship as id Software’s original, unmodified shareware and demo archives. Your browser unpacks them when you tap Play!, so there is nothing to download or extract yourself.</p></div>
+      <div><h3>No files needed</h3><p>Quake, DOOM and Quake II ship as id Software’s original, unmodified shareware and demo archives. Your browser unpacks them when you tap Play!, so there is nothing to download or extract yourself.</p></div>
       <div><h3>Touch controls</h3><p>Turn the phone sideways. The left stick moves, the right half of the screen looks around in Quake II, and the big red button fires. Bluetooth controllers and keyboards also work.</p></div>
       <div><h3>Saves stay put</h3><p>Game saves and settings are stored in Safari on this phone. Quake II downloads 37 MB each visit, so use Wi-Fi.</p></div>
     </div>
@@ -316,6 +339,7 @@ function scene(c){
   }
   const g=x.createLinearGradient(0,0,0,h);
   if(kind==='q2'){g.addColorStop(0,'#3a2a20');g.addColorStop(1,'#120c10');}
+  else if(kind==='q1'){g.addColorStop(0,'#2e2a1c');g.addColorStop(1,'#0e0c08');}
   else{g.addColorStop(0,'#4a1616');g.addColorStop(1,'#140808');}
   x.fillStyle=g;x.fillRect(0,0,w,h);
   // perspective corridor floor grid
@@ -452,8 +476,8 @@ addEventListener('keydown',e=>{if(!running)return;const k=e.key;
 
 
 /* ---------- in-site player ---------- */
-const GAMES={quake2:'quake2/index.html',voxel:'games/voxel-sandbox/index.html',doom:'doom/index.html',hexgl:'games/hexgl/index.html',hextris:'games/hextris/index.html','2048':'games/2048/index.html',adarkroom:'games/adarkroom/index.html?ignorebrowser=true','clumsy-bird':'games/clumsy-bird/index.html'};
-const OWN_BAR={quake2:1,doom:1};
+const GAMES={quake1:'quake1/index.html',quake2:'quake2/index.html',voxel:'games/voxel-sandbox/index.html',doom:'doom/index.html',hexgl:'games/hexgl/index.html',hextris:'games/hextris/index.html','2048':'games/2048/index.html',adarkroom:'games/adarkroom/index.html?ignorebrowser=true','clumsy-bird':'games/clumsy-bird/index.html'};
+const OWN_BAR={quake1:1,quake2:1,doom:1};
 /* Keyboard commands each desktop game expects. dpad: arrow keys. acts: extra buttons [label,key,mode]. */
 const CONTROLS={
   '2048':{dpad:true,acts:[]},
