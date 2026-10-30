@@ -107,7 +107,22 @@ ui.forget.addEventListener("click", async () => {
 
 // ------------------------------------------------------------ emulator
 
+// Downloads a file, trying again (up to 3 times) when the connection drops:
+// phones lose a 50 MB download now and then.
 async function fetchBytes(url, onProgress) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await fetchOnce(url, onProgress); }
+    catch (e) {
+      if (attempt >= 3 || /\(4\d\d\)/.test(e.message)) {
+        throw new Error(`Downloading ${url.split("/").pop()} failed (${e.message}). Check the connection and tap Play to try again.`);
+      }
+      log(`[ConMon] ${url}: ${e.message}; trying again`);
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+}
+
+async function fetchOnce(url, onProgress) {
   const res = await fetch(url, { cache: "no-cache" });
   if (!res.ok) throw new Error(`Couldn't download ${url} (${res.status}).`);
   // Content-Length is only a hint for the progress bar: a host that
@@ -264,6 +279,8 @@ for (const b of ui.pad.querySelectorAll("button")) {
   ui.credit.textContent = `${game.name}: ${game.by} (${game.licence}).` +
     (game.demo ? " The demo data is id Software's freely distributable Quake II demo." : "");
 
+  // Pick up a newer coi-sw.js right away if one was installed before.
+  if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
   // GitHub Pages can't send the isolation headers: a service worker adds
   // them (coi-sw.js), then the page reloads once under it.
   if (!window.crossOriginIsolated && "serviceWorker" in navigator && window.isSecureContext) {
