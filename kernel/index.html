@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>
+  // Opened straight from the unzipped folder? Browsers block the emulator and
+  // downloads on file:// pages, so explain how to start it properly.
+  if (location.protocol === "file:") document.addEventListener("DOMContentLoaded", function () {
+    document.body.innerHTML = '<div style="max-width:640px;margin:60px auto;padding:24px;font:16px/1.5 system-ui,sans-serif;color:#e6edf3;background:#11161c;border:1px solid #2a3440;border-radius:12px">' +
+      '<h1 style="margin-top:0;font-size:24px">Start ConMon Lab with its launcher</h1>' +
+      '<p>This page was opened straight from the folder. Browsers don\'t allow the PC emulator or downloads there, so it can\'t run like this.</p>' +
+      '<p><b>On Windows:</b> in the unzipped folder, double-click <code>Start ConMon Lab (Windows).bat</code>. It opens ConMon Lab at <code>http://localhost:8080</code>; keep its window open while you play.</p>' +
+      '<p><b>On a Mac or Linux:</b> run <code>sh start-mac-linux.sh</code> in the folder.</p>' +
+      '<p>Or open the free online copy: <a href="https://vendemiaraul-cyber.github.io/An-OS-Kernel-Claude-Made/kernel/" style="color:#4ade80">vendemiaraul-cyber.github.io/An-OS-Kernel-Claude-Made</a></p></div>';
+    document.body.style.background = "#0b0e12";
+  });
+</script>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kernel Lab · ConMon</title>
+  <meta name="description" content="Boot ConMon or your own x86 kernel in the browser with the v86 emulator.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+  <link rel="stylesheet" href="/An-OS-Kernel-Claude-Made/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2313171c'/%3E%3Crect x='3' y='3' width='6' height='6' rx='1' fill='%234ade80'/%3E%3C/svg%3E">
+  <style>
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; margin: 20px 0; }
+    @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+    .monitor { background: #050607; border: 1px solid var(--line); border-radius: 14px; padding: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.02); }
+    .monitor-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .monitor-bar .btn { padding: 6px 10px; font-size: 13px; }
+    .monitor-bar .name { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; flex: 1 1 140px; min-width: 0; }
+    .screen-fit { position: relative; background: #000; border-radius: 6px; overflow: hidden; min-height: 200px; cursor: text; }
+    .ps2-frame { display: block; width: 100%; aspect-ratio: 4 / 3; border: 0; border-radius: 6px; background: #000; }
+    .ps2-frame[hidden], .screen-fit[hidden], .typebar[hidden] { display: none; }
+    .screen-fit:focus-within, .screen-fit.focused { outline: 1px solid rgba(74,222,128,.35); }
+    #screen { transform-origin: top left; display: inline-block; }
+    #screen > div { white-space: pre; font: 14px/14px var(--mono); color: #c0c0c0; }
+    #screen canvas { display: block; image-rendering: pixelated; }
+    .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 20px; background: radial-gradient(ellipse at center, #0d1410 0%, #000 70%); }
+    .overlay .big { font-family: var(--mono); font-size: 22px; color: var(--accent); text-shadow: 0 0 12px rgba(74,222,128,.6); }
+    .progress { width: min(320px, 80%); height: 4px; background: #111; border-radius: 4px; overflow: hidden; }
+    .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+
+    .typebar { display: flex; gap: 8px; margin-top: 10px; }
+    .typebar .field { flex: 1; font-family: var(--mono); font-size: 14px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+    .drop { display: block; border: 1.5px dashed var(--line); border-radius: 10px; padding: 18px 12px; text-align: center; color: var(--muted); font-size: 14px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .drop.over, .drop:hover { border-color: var(--accent); background: rgba(74,222,128,.04); color: var(--text); }
+    .drop strong { color: var(--text); }
+    .side { display: flex; flex-direction: column; gap: 16px; }
+    .side .panel > * + * { margin-top: 12px; }
+    .file-info { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+
+    .serial { background: #050607; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 12px/1.45 var(--mono); color: #b8f5c9; height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .samples { display: flex; flex-direction: column; gap: 8px; }
+    .sample { text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; color: var(--text); }
+    .sample:hover { border-color: #3a4450; }
+    .sample.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .sample b { display: block; font-size: 15px; }
+    .sample span { display: block; color: var(--muted); font-size: 12px; font-family: var(--mono); margin-top: 2px; }
+    .pkg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 15px; }
+    .pill { font: 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+    .pill.on { color: var(--accent); border-color: rgba(74,222,128,.45); }
+    .chip.pkg { border-color: rgba(74,222,128,.35); color: #a7f3c0; }
+    .monitor { position: relative; }
+    .taskbar[hidden], .vm-window[hidden] { display: none; }
+    .taskbar { display: flex; width: 100%; align-items: center; gap: 8px; margin: 0 0 10px; padding: 9px 12px; border-radius: 9px; border: 1px solid rgba(74,222,128,.45); background: rgba(74,222,128,.08); color: #a7f3c0; font: 13px var(--mono); cursor: pointer; text-align: left; }
+    .taskbar::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); flex: none; }
+    .screen-fit.zoomed { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .screen-fit.zoomed #screen { margin-right: 0; }
+    .keys { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .keys button, .vm-keys button { min-width: 44px; min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: 13px var(--mono); cursor: pointer; touch-action: manipulation; }
+    .keys button:active, .vm-keys button:active { background: #26303a; }
+
+    /* Windows over the screen (the DOOM window MikeOS opens) */
+    .vm-window { position: absolute; top: 56px; right: 18px; width: min(660px, calc(100% - 36px)); z-index: 20; background: #0d1014; border: 1px solid #3a4450; border-radius: 12px; box-shadow: 0 24px 70px rgba(0,0,0,.7); display: flex; flex-direction: column; overflow: hidden; }
+    .vm-window.focused { border-color: rgba(74,222,128,.6); }
+    .vm-title { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; background: #161b21; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; touch-action: none; }
+    .vm-led { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+    .vm-window.running .vm-led { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .vm-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .vm-state { font: 12px var(--mono); color: var(--muted); }
+    .vm-spacer { flex: 1; }
+    .vm-btn { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+    .vm-close { font-size: 16px; line-height: 1; padding: 4px 10px; }
+    .vm-screen { background: #000; overflow: hidden; outline: none; min-height: 160px; cursor: text; }
+    .vm-inner { transform-origin: top left; display: inline-block; }
+    .vm-inner > div { white-space: pre; font: 14px/14px var(--mono); color: #c0c0c0; }
+    .vm-inner canvas { display: block; image-rendering: pixelated; }
+    .vm-hint { margin: 0; padding: 8px 12px 0; color: var(--muted); font-size: 13px; }
+    .vm-keys { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+    .vm-type { display: flex; gap: 8px; padding: 8px 12px 12px; }
+    .vm-type .field { flex: 1; min-width: 0; font-family: var(--mono); }
+
+    /* Phones */
+    @media (max-width: 720px) {
+      main.wrap > section:first-child h1 { font-size: 28px; }
+      main.wrap > section:first-child .lead { font-size: 15px; }
+      .layout { margin-top: 14px; }
+      .monitor { margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px))); border-radius: 0; border-left: 0; border-right: 0; padding: 10px max(10px, env(safe-area-inset-right, 0px)) 12px max(10px, env(safe-area-inset-left, 0px)); }
+      .monitor-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; }
+      .monitor-bar::-webkit-scrollbar { display: none; }
+      .monitor-bar .name { display: none; }
+      .monitor-bar .btn { flex: none; padding: 6px 9px; font-size: 12px; }
+      .screen-fit { min-height: 150px; border-radius: 4px; }
+      .typebar { position: sticky; bottom: env(safe-area-inset-bottom, 0px); z-index: 5; background: #050607; padding-top: 8px; margin-top: 4px; }
+      .typebar .field { font-size: 16px; }              /* stops iOS zooming in on focus */
+      .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+      .chips::-webkit-scrollbar { display: none; }
+      .chip { flex: none; padding: 8px 12px; font-size: 13px; }
+      .keys button { flex: 1 1 0; min-width: 0; }
+      .vm-window { position: fixed; inset: 0; width: auto; border-radius: 0; border: 0; z-index: 50; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); overflow-y: auto; }
+      .vm-title { cursor: default; }
+      .vm-type .field { font-size: 16px; }
+      .vm-keys button { flex: 1 1 calc(20% - 6px); min-width: 0; min-height: 44px; }
+    }
+    .doom-window .vm-title { cursor: default; }
+    .doom-screen { cursor: default; }
+    .doom-screen canvas { width: 100%; height: auto; aspect-ratio: 8 / 5; image-rendering: auto; }
+    .doom-pad { padding: 0 12px 12px; }
+    @media (max-width: 720px) { .doom-window { display: flex; } .doom-window[hidden] { display: none; } }
+    .byo-window { width: min(560px, calc(100% - 36px)); }
+    .byo-body { padding: 10px 14px 14px; font-size: 14px; line-height: 1.5; }
+    .byo-body ol { padding-left: 20px; margin: 8px 0 12px; }
+    .screen-hint { margin: 8px 0 0; font-size: 13px; color: #a7f3c0; }
+    .game-pad { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-top: 10px; user-select: none; -webkit-user-select: none; touch-action: none; }
+    .game-pad[hidden], .keys[hidden] { display: none; }
+    .game-pad button { border: 1px solid #3a4450; background: #1a1f26; color: var(--text); border-radius: 10px; font: 700 13px var(--mono); cursor: pointer; touch-action: none; -webkit-tap-highlight-color: transparent; }
+    .game-pad button.held { background: #2f6b46; border-color: var(--accent); }
+    .pad-dir { display: grid; grid-template-columns: repeat(3, 54px); grid-template-rows: repeat(3, 46px); gap: 4px; flex: none; }
+    .pad-dir button { font-size: 18px; }
+    .pad-up { grid-column: 2; grid-row: 1; } .pad-left { grid-column: 1; grid-row: 2; }
+    .pad-right { grid-column: 3; grid-row: 2; } .pad-down { grid-column: 2; grid-row: 3; }
+    .pad-act { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; flex: 1; min-width: 0; }
+    .pad-act button { min-height: 44px; padding: 4px; font-size: 12px; }
+    .pad-fire { background: #5b1414 !important; border-color: #a33 !important; }
+    .pad-quit { color: var(--warn) !important; }
+    @media (max-width: 720px) { .game-pad { flex-direction: column; align-items: stretch; } .pad-dir { margin: 0 auto; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 52px); } .pad-act { grid-template-columns: repeat(5, 1fr); } }
+    .keys .guest-only { display: none; }
+    .keys[data-mode="guest"] .guest-only { display: inline-block; }
+    .keys[data-mode="guest"] [data-key="ctrlc"], .keys[data-mode="guest"] [data-key="ctrll"] { display: none; }
+    .tips li { margin: 6px 0; }
+    .tips { padding-left: 18px; margin: 0; color: var(--muted); font-size: 14px; }
+    .tips b { color: var(--text); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/An-OS-Kernel-Claude-Made/"><span class="dot"></span>ConMon<span class="full">&nbsp;Lab</span></a>
+      <nav class="nav">
+        <a href="/An-OS-Kernel-Claude-Made/kernel/" class="active">Kernel Lab</a>
+        <a href="/An-OS-Kernel-Claude-Made/youtube/">YouTube Test</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section style="margin-top:28px">
+      <h1>Kernel Lab</h1>
+      <p class="lead">A real x86 PC emulated in your browser. ConMon boots by default; drop in your own Multiboot kernel, floppy, ISO or disk image to try it.</p>
+    </section>
+
+    <div class="layout">
+      <!-- emulator -->
+      <section>
+        <div class="monitor" id="monitor">
+          <div class="monitor-bar">
+            <span id="status" class="badge"><span class="led"></span><span id="status-text">idle</span></span>
+            <span id="current-name" class="name"></span>
+            <button class="btn" id="btn-pause" disabled>Pause</button>
+            <button class="btn" id="btn-restart" disabled>Restart</button>
+            <button class="btn" id="btn-cad" disabled title="Send Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+            <button class="btn" id="btn-full" disabled>Fullscreen</button>
+            <button class="btn" id="btn-zoom" aria-pressed="false" title="Bigger text; swipe the screen sideways">Zoom</button>
+          </div>
+          <button class="taskbar" id="taskbar" hidden></button>
+
+          <div class="screen-fit" id="screen-fit" tabindex="0" aria-label="Emulator screen. Click, then type.">
+            <div id="screen"></div>
+            <div class="overlay" id="overlay">
+              <div class="big">&gt; ConMon_</div>
+              <div class="muted small" id="overlay-text">Press Boot to start the emulator.</div>
+              <div class="progress hidden" id="progress"><div></div></div>
+              <button class="btn primary" id="btn-boot-overlay">Boot</button>
+            </div>
+          </div>
+
+          <!-- PS2 games run here, in place of ConMon's screen -->
+          <iframe class="ps2-frame" id="ps2-frame" hidden title="PS2 game" allow="cross-origin-isolated; autoplay; fullscreen; gamepad"></iframe>
+          <p class="screen-hint" id="screen-hint" hidden></p>
+          <form class="typebar" id="typebar" autocomplete="off">
+            <input class="field" id="type-input" placeholder="Type a command and press Send (handy on phones)" enterkeyhint="send" autocapitalize="off" spellcheck="false">
+            <button class="btn primary" type="submit">Send</button>
+          </form>
+          <div class="keys" id="keys" aria-label="Special keys">
+            <button data-key="esc">Esc</button><button data-key="tab">Tab</button>
+            <button data-key="up" aria-label="Up, previous command">↑</button><button data-key="down" aria-label="Down">↓</button>
+            <button data-key="ctrlc">Ctrl+C</button><button data-key="ctrll">Ctrl+L</button>
+            <button data-key="left" class="guest-only" aria-label="Left">←</button><button data-key="right" class="guest-only" aria-label="Right">→</button>
+            <button data-key="space" class="guest-only">Space</button><button data-key="enter" class="guest-only">Enter</button>
+          </div>
+          <div class="game-pad" id="game-pad" hidden aria-label="Game controls">
+            <div class="pad-dir">
+              <button data-sc="48" data-e0 class="pad-up" aria-label="Forward">▲</button>
+              <button data-sc="4b" data-e0 class="pad-left" aria-label="Turn left">◀</button>
+              <button data-sc="4d" data-e0 class="pad-right" aria-label="Turn right">▶</button>
+              <button data-sc="50" data-e0 class="pad-down" aria-label="Back">▼</button>
+            </div>
+            <div class="pad-act">
+              <button data-sc="1d" class="pad-fire">FIRE</button>
+              <button data-sc="39">USE</button>
+              <button data-sc="2a">RUN</button>
+              <button data-sc="33">◁ STRAFE</button>
+              <button data-sc="34">STRAFE ▷</button>
+              <button data-sc="0f">MAP</button>
+              <button data-sc="01">ESC</button>
+              <button data-sc="1c">ENTER</button>
+              <button data-sc="15">Y</button>
+              <button data-sc="58" class="pad-quit">QUIT</button>
+            </div>
+          </div>
+          <!-- ReactOS: bring your own CD image -->
+          <div class="vm-window byo-window" id="byo-window" hidden role="dialog" aria-label="Boot ReactOS">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">ReactOS · a free, open-source Windows-like OS</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="byo-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p>Real Windows is Microsoft's paid software, so it can't be included. ReactOS is built to look and run like Windows (Start menu, Explorer, many Windows programs) and is free.</p>
+              <ol>
+                <li>Download the ReactOS CD (about 100 MB) from <a href="https://reactos.org/download/" target="_blank" rel="noopener">reactos.org/download</a>.</li>
+                <li>Unzip it. On an iPhone: open the Files app and tap the zip.</li>
+                <li>Tap the button below and pick the <span class="mono">.iso</span> file.</li>
+              </ol>
+              <button class="btn primary" id="byo-pick" type="button">Choose the ReactOS .iso</button>
+              <input type="file" id="byo-file" hidden accept=".iso,application/x-iso9660-image,application/octet-stream">
+              <p class="small muted" id="byo-status"></p>
+              <p class="small muted">It runs with 256 MB of RAM and takes a few minutes to start. On a phone it is slow; a computer works best.</p>
+            </div>
+          </div>
+          <!-- PS2 games: Play! runs them on /ps2/ -->
+          <div class="vm-window byo-window" id="ps2-window" hidden role="dialog" aria-label="PS2 game">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name" id="ps2-name">PS2 game</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="ps2-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p id="ps2-about"></p>
+              <p class="small muted" id="ps2-needs"></p>
+              <p class="small muted">It runs in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, on a page of its own (a new tab). A recent computer runs it best; phones are slow.</p>
+              <button class="btn primary" id="ps2-play" type="button">Play</button>
+            </div>
+          </div>
+          <!-- Android: real Android on the person's own server, streamed -->
+          <div class="vm-window byo-window" id="android-window" hidden role="dialog" aria-label="Android on your server">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">Android · real Android 12 on your server</span>
+              <span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="android-close" aria-label="Close">✕</button>
+            </div>
+            <div class="byo-body">
+              <p>Android is too big for the in-browser PC, so it runs on a small ARM server you own (Oracle Cloud Free Tier works) and streams here.</p>
+              <ol>
+                <li>Set the server up once with the script in <a href="https://github.com/vendemiaraul-cyber/An-OS-Kernel-Claude-Made/tree/main/android-server" target="_blank" rel="noopener">android-server</a> (one paste over SSH).</li>
+                <li>Paste the <span class="mono">https://…</span> address it printed, then tap Open and sign in with its user and password.</li>
+              </ol>
+              <input class="field" id="android-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://1-2-3-4.sslip.io" style="width:100%;margin:6px 0">
+              <button class="btn primary" id="android-open" type="button">Open Android</button>
+              <p class="small muted" id="android-status"></p>
+            </div>
+          </div>
+          <!-- DOOM in a window, opened by a guest (MikeOS's DOOM.BAS) over the serial port -->
+          <div class="vm-window doom-window" id="doom-window" hidden role="dialog" aria-label="DOOM">
+            <div class="vm-title">
+              <span class="vm-led"></span><span class="vm-name">DOOM · opened from MikeOS</span>
+              <span class="vm-state" id="doom-state">loading…</span><span class="vm-spacer"></span>
+              <button class="vm-btn vm-close" id="doom-close" aria-label="Close DOOM and go back">✕</button>
+            </div>
+            <div class="vm-screen doom-screen" id="doom-screen" tabindex="0" aria-label="DOOM screen. Click, then play with the keyboard."><canvas id="doom-canvas" width="640" height="400"></canvas></div>
+            <p class="vm-hint">Arrows move · Ctrl fire · Space use · Shift run · Enter menu · F12 or ✕ goes back to MikeOS.</p>
+            <div class="game-pad doom-pad" id="doom-pad" aria-label="DOOM controls">
+              <div class="pad-dir">
+                <button data-dk="UPARROW" class="pad-up" aria-label="Forward">▲</button>
+                <button data-dk="LEFTARROW" class="pad-left" aria-label="Turn left">◀</button>
+                <button data-dk="RIGHTARROW" class="pad-right" aria-label="Turn right">▶</button>
+                <button data-dk="DOWNARROW" class="pad-down" aria-label="Back">▼</button>
+              </div>
+              <div class="pad-act">
+                <button data-dk="FIRE" class="pad-fire">FIRE</button>
+                <button data-dk="USE">USE</button>
+                <button data-dk="SHIFT">RUN</button>
+                <button data-dk="STRAFE_L">◁ STRAFE</button>
+                <button data-dk="STRAFE_R">STRAFE ▷</button>
+                <button data-dk="TAB">MAP</button>
+                <button data-dk="ESCAPE">ESC</button>
+                <button data-dk="ENTER">ENTER</button>
+                <button data-dk="y">Y</button>
+                <button data-dk="QUIT" class="pad-quit">BACK</button>
+              </div>
+            </div>
+          </div>
+          <div class="chips" id="chips" aria-label="ConMon commands">
+            <button class="chip" data-cmd="help">help</button>
+            <button class="chip" data-cmd="calc (2+3)*7">calc (2+3)*7</button>
+            <button class="chip" data-cmd="ls">ls</button>
+            <button class="chip" data-cmd="cat readme.txt">cat readme.txt</button>
+            <button class="chip" data-cmd="write notes.txt Hello from the browser">write notes.txt …</button>
+            <button class="chip" data-cmd="mem">mem</button>
+            <button class="chip" data-cmd="uptime">uptime</button>
+            <button class="chip" data-cmd="guess">guess</button>
+            <button class="chip" data-cmd="crash">crash</button>
+            <button class="chip pkg" data-cmd="install doom">install doom</button>
+            <button class="chip pkg" data-cmd="doom">doom</button>
+            <button class="chip pkg" data-cmd="doom ascii">doom ascii</button>
+            <button class="chip pkg" data-cmd="install native doom">install native doom</button>
+            <button class="chip pkg" data-cmd="native doom">native doom</button>
+            <button class="chip pkg" data-cmd="install doomy">install doomy</button>
+            <button class="chip pkg" data-cmd="doomy">doomy</button>
+            <button class="chip pkg" data-cmd="install ps2">install ps2</button>
+            <button class="chip pkg" data-cmd="run game A">run game A</button>
+            <button class="chip pkg" data-cmd="install solMeteo">install solMeteo</button>
+            <button class="chip pkg" data-cmd="Rome">Rome</button>
+            <button class="chip pkg" data-cmd="Bologna">Bologna</button>
+            <button class="chip pkg" data-cmd="cities Italy">cities Italy</button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="row" style="margin-bottom:10px">
+            <h2 style="margin:0">Serial console <span class="muted small mono">COM1</span></h2>
+            <span style="flex:1"></span>
+            <button class="btn" id="btn-serial-clear">Clear</button>
+          </div>
+          <pre class="serial" id="serial"></pre>
+        </div>
+      </section>
+
+      <!-- controls -->
+      <aside class="side">
+        <div class="panel">
+          <h2>Bundled kernels</h2>
+          <div class="samples" id="samples">
+            <button class="sample active" data-sample="conmon">
+              <b>ConMon 0.1</b><span>Multiboot · C/C++ kernel with a shell · 66 KB</span>
+            </button>
+            <button class="sample" data-sample="desktop">
+              <b>Linux Desktop</b><span>bzImage · Linux 6.6 with the Nano-X windowing desktop · 2.5 MB</span>
+            </button>
+            <button class="sample" data-sample="linux">
+              <b>Linux 6.6 (shell)</b><span>bzImage · Linux with a BusyBox text shell · 1.5 MB</span>
+            </button>
+            <button class="sample" data-sample="reactos">
+              <b>ReactOS (Windows-like)</b><span>CD image · open-source Windows look-alike with a desktop · bring the .iso</span>
+            </button>
+            <button class="sample" data-sample="android">
+              <b>Android (your server)</b><span>Real Android 12 streamed from your own ARM server · setup script included</span>
+            </button>
+            <button class="sample" data-sample="mikeos">
+              <b>MikeOS 4.5</b><span>Floppy · a small OS with apps, BASIC, games and a DOOM launcher</span>
+            </button>
+            <button class="sample" data-sample="tetros">
+              <b>Tetros</b><span>Boot sector · Tetris in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="bootbasic">
+              <b>bootBASIC</b><span>Boot sector · a BASIC interpreter in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="bootos">
+              <b>bootOS</b><span>Boot sector · a whole OS with a file system in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="sectorlisp">
+              <b>SectorLISP</b><span>Boot sector · LISP in 512 bytes</span>
+            </button>
+            <button class="sample" data-sample="hello">
+              <b>Hello boot sector</b><span>Boot sector · ConMon Lab's own 16-bit demo</span>
+            </button>
+          </div>
+          <p class="muted small" style="margin:0">Linux and BusyBox (GPL-2.0), Nano-X (MPL-1.1), ReactOS (GPL, downloaded by you), Redroid (Apache-2.0) and ws-scrcpy (MIT) on your server, MikeOS (BSD-3), Tetros (MIT), bootBASIC and bootOS (BSD-2), SectorLISP (ISC). <a href="/An-OS-Kernel-Claude-Made/guests/SOURCES.txt" target="_blank" rel="noopener">Sources and licences</a>.</p>
+        </div>
+
+        <div class="panel" id="pkg-panel">
+          <h2>Packages</h2>
+          <p class="muted small" style="margin:0">ConMon asks this page for help over its serial port: the page runs games, fetches weather, then streams the results back into the OS.</p>
+          <div class="pkg-row"><span class="mono">ps2</span><span class="pill" id="pkg-ps2">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install ps2</span> for the PS2 games, each with a letter, then <span class="mono">run game A</span>. They run in <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a>, the open-source PS2 emulator, right on ConMon's screen. A: Quake II (glampert's PS2 port) with the free demo's 3 levels; your own <span class="mono">pak0.pak</span> unlocks the full game.</div>
+          <div class="pkg-row"><span class="mono">solMeteo</span><span class="pill" id="pkg-meteo">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install solMeteo</span>, then any place name. ConMon clears the screen, flies an ASCII world map to the place and shows the weather from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Later: <span class="mono">meteo Tokyo</span>. Type <span class="mono">cities Italy</span> to browse the 2,582 built-in cities.</div>
+          <div class="pkg-row"><span class="mono">doom</span><span class="pill" id="pkg-doom">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install doom</span>, then <span class="mono">doom</span>: the real DOOM (shareware Episode 1) drawn on ConMon's text screen, or <span class="mono">doom ascii</span> to draw it in ASCII characters. Arrows move, Ctrl fires, Space opens doors, F12 (or QUIT) goes back. On a phone the game pad appears under the screen.</div>
+          <div class="pkg-row"><span class="mono">native doom</span><span class="pill" id="pkg-nativedoom">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install native doom</span>, then <span class="mono">native doom</span>: DOOM compiled for ConMon, run by ConMon's own CPU at the real 320×200 in 256 colours. ConMon prints the frame rate when you press F12. Needs 64 MB of RAM.</div>
+          <div class="pkg-row"><span class="mono">doomy</span><span class="pill" id="pkg-doomy">not installed</span></div>
+          <div class="muted small">Type <span class="mono">install doomy</span>, then <span class="mono">doomy</span>: a small DOOM-style game written in Python, run in this page by <a href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a> (~10 MB download). On your PC: <a href="/An-OS-Kernel-Claude-Made/doomy/doomy.py" download>download doomy.py</a> and run <span class="mono">python doomy.py</span> in a terminal.</div>
+          <div class="file-info" id="pkg-busy" style="color:var(--accent)"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Load your own</h2>
+          <label class="drop" id="drop">
+            <input type="file" id="file" hidden accept=".bin,.elf,.kernel,.bzimage,.vmlinuz,.img,.ima,.flp,.iso,.hdd,.raw,.vfd">
+            <div><strong>Choose a file</strong> or drop it here</div>
+            <div class="small" style="margin-top:4px">.bin / .elf · bzImage · .img · .iso</div>
+          </label>
+          <div class="file-info" id="file-info">No file chosen.</div>
+
+          <div>
+            <label class="lbl" for="url">…or load from a URL</label>
+            <input class="field" id="url" style="width:100%" placeholder="https://example.com/kernel.bin" inputmode="url">
+            <div class="muted small" style="margin-top:4px">The server must allow cross-origin downloads (CORS).</div>
+          </div>
+
+          <div class="row">
+            <div class="grow">
+              <label class="lbl" for="kind">Boot as</label>
+              <select class="field" id="kind" style="width:100%">
+                <option value="auto">Auto-detect</option>
+                <option value="multiboot">Multiboot kernel</option>
+                <option value="bzimage">Linux kernel (bzImage)</option>
+                <option value="fda">Floppy image</option>
+                <option value="cdrom">CD-ROM (ISO)</option>
+                <option value="hda">Hard disk image</option>
+              </select>
+            </div>
+            <div style="width:110px">
+              <label class="lbl" for="ram">RAM</label>
+              <select class="field" id="ram" style="width:100%">
+                <option value="32">32 MB</option>
+                <option value="64" selected>64 MB</option>
+                <option value="128">128 MB</option>
+                <option value="256">256 MB</option>
+                <option value="512">512 MB</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="btn primary" id="btn-boot" style="width:100%">Boot this file</button>
+        </div>
+
+        <div class="panel">
+          <h2>What boots here?</h2>
+          <ul class="tips">
+            <li><b>Multiboot v1 kernels</b> (ELF), like ConMon or most tutorial kernels built with GRUB's <span class="mono">multiboot</span> header. Multiboot2-only kernels won't start.</li>
+            <li><b>Floppy images</b> (≤ 2.88 MB): FreeDOS, KolibriOS, bootsector games.</li>
+            <li><b>ISOs and disk images</b>: small Linux distros, BSDs, old Windows. Large images take a while since they load into memory.</li>
+            <li>32-bit x86 only: no 64-bit long mode.</li>
+          </ul>
+          <p class="muted small" style="margin:0">Emulation by <a href="https://github.com/copy/v86" target="_blank" rel="noopener">v86</a> (BSD-2) with SeaBIOS (LGPL). Files you load never leave your browser.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="wrap footer">ConMon Lab · <a href="/An-OS-Kernel-Claude-Made/">home</a></footer>
+
+  <script src="/An-OS-Kernel-Claude-Made/v86/libv86.js"></script>
+  <script src="/An-OS-Kernel-Claude-Made/kernel/hostlink.js?v=5"></script>
+  <script src="/An-OS-Kernel-Claude-Made/kernel/kernel.js?v=5"></script>
+</body>
+</html>

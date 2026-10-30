@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ConMon PS2</title>
+  <meta name="theme-color" content="#0b0d10">
+  <style>
+    :root { --bg: #0b0d10; --panel: #12161b; --line: #2a323c; --text: #e6edf3; --muted: #8b98a5; --accent: #4ade80; --warn: #fbbf24; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+    header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    header b { font-size: 16px; }
+    header .sp { flex: 1; }
+    header a { color: var(--muted); font-size: 13px; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; }
+    .screen { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    canvas { width: 100%; height: 100%; display: block; outline: none; image-rendering: auto; }
+    .over { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; background: rgba(0,0,0,.82); }
+    .over[hidden] { display: none; }
+    .card { max-width: 520px; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    p { margin: 6px 0; }
+    .muted { color: var(--muted); } .small { font-size: 13px; }
+    .btn { font: inherit; border: 1px solid var(--line); background: #1a2028; color: var(--text); border-radius: 8px; padding: 9px 16px; cursor: pointer; margin: 6px 4px 0; }
+    .btn.primary { background: var(--accent); color: #05210f; border-color: var(--accent); font-weight: 600; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .bar { height: 6px; background: #1a2028; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+    .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+    .err { color: var(--warn); }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .stat { font: 13px var(--mono); color: var(--muted); }
+    .pad { display: none; margin-top: 12px; gap: 8px; grid-template-columns: repeat(6, 1fr); }
+    .pad button { font: 600 13px system-ui; padding: 14px 4px; border-radius: 10px; border: 1px solid var(--line); background: #1a2028; color: var(--text); touch-action: none; user-select: none; -webkit-user-select: none; }
+    .pad button.on { background: #24402f; border-color: var(--accent); }
+    @media (pointer: coarse) { .pad { display: grid; } }
+    details { margin-top: 14px; } summary { cursor: pointer; color: var(--muted); }
+    pre#log { max-height: 220px; overflow: auto; background: #05070a; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: 12px/1.4 var(--mono); white-space: pre-wrap; }
+    kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+    a { color: var(--accent); }
+    .quit { display: none; }
+    /* Inside Kernel Lab, in place of ConMon's screen: just the game, its pad and a way back. */
+    body.embed { background: #000; }
+    body.embed header, body.embed main > p, body.embed details, body.embed #need, body.embed .row { display: none; }
+    body.embed main { padding: 0; max-width: none; }
+    body.embed .screen { border: 0; border-radius: 0; }
+    body.embed .quit { display: block; position: absolute; top: 6px; right: 6px; z-index: 5; font: 600 12px system-ui; padding: 6px 10px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.55); color: #e6edf3; cursor: pointer; }
+    body.embed .pad { margin: 8px 0 0; gap: 6px; }
+    body.embed .pad button { padding: 11px 2px; }
+  </style>
+</head>
+<body>
+  <header><b>ConMon PS2</b><span class="muted small" id="game-name"></span><span class="sp"></span><a href="/An-OS-Kernel-Claude-Made/kernel/">Kernel Lab</a></header>
+  <main>
+    <div class="screen">
+      <canvas id="outputCanvas" width="640" height="480" tabindex="0"></canvas>
+      <button class="quit" id="quit" type="button">✕ Back to ConMon</button>
+      <div class="over" id="over">
+        <div class="card">
+          <h1 id="title">PS2 game</h1>
+          <p class="muted small" id="about"></p>
+          <button class="btn primary" id="start" type="button" disabled>Play</button>
+          <div class="bar"><i id="bar"></i></div>
+          <p class="small muted" id="status">Checking this browser…</p>
+        </div>
+      </div>
+    </div>
+    <div class="row"><span class="stat" id="fps"></span><span class="sp"></span>
+      <button class="btn" id="full" type="button">Full screen</button></div>
+    <div id="need" hidden>
+      <p class="small muted"><span id="have"></span> <span id="need-text"></span></p>
+      <button class="btn" id="pick" type="button">Use my own pak0.pak</button>
+      <input type="file" id="file" hidden>
+      <button class="btn" id="forget" type="button" hidden>Back to the demo</button>
+    </div>
+    <div class="pad" id="pad">
+      <button data-code="ArrowUp">▲</button><button data-code="ArrowDown">▼</button><button data-code="ArrowLeft">◀</button><button data-code="ArrowRight">▶</button><button data-code="KeyZ">✕ Fire</button><button data-code="KeyX">○</button>
+      <button data-code="KeyT">Walk</button><button data-code="KeyG">Back</button><button data-code="KeyF">Strafe ◀</button><button data-code="KeyH">Strafe ▶</button><button data-code="KeyA">□</button><button data-code="KeyS">△</button>
+      <button data-code="Key1">L1</button><button data-code="Key2">L2</button><button data-code="Key8">R1</button><button data-code="Key9">R2</button><button data-code="Enter">Start</button><button data-code="Backspace">Select</button>
+    </div>
+    <p class="small muted">Keys: <kbd>←↑→↓</kbd> D-pad · <kbd>T</kbd><kbd>F</kbd><kbd>G</kbd><kbd>H</kbd> left stick · <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> right stick · <kbd>Z</kbd> ✕ · <kbd>X</kbd> ○ · <kbd>A</kbd> □ · <kbd>S</kbd> △ · <kbd>1</kbd><kbd>2</kbd> L1 L2 · <kbd>8</kbd><kbd>9</kbd> R1 R2 · <kbd>Enter</kbd> Start · <kbd>Backspace</kbd> Select. Click the picture first so it gets the keys.</p>
+    <p class="small muted">Emulator: <a href="https://github.com/jpd002/Play-" target="_blank" rel="noopener">Play!</a> by Jean-Philip Desjardins (BSD-2-Clause), compiled to WebAssembly. <span id="credit"></span> PS2 emulation is heavy: a recent computer runs it best; phones are slow.</p>
+    <details><summary>Emulator log</summary><pre id="log"></pre></details>
+  </main>
+  <script type="module" src="ps2.js?v=6"></script>
+</body>
+</html>

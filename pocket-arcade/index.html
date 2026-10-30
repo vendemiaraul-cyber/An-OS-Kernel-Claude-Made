@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15131f">
+<title>Pocket Arcade</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Rubik:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one arcade "shelf" — two featured cabinets, the built-in game, then a rack of GitHub finds. Single dark look by choice. */
+:root{
+  --bg:#15131f;          /* cabinet room */
+  --panel:#1f1c2d;       /* card body */
+  --panel-2:#2a2640;     /* raised */
+  --line:#3a3556;
+  --fg:#efeaf7;
+  --muted:#a59fbd;
+  --amber:#ffb547;       /* coin-slot accent */
+  --amber-ink:#2a1a00;
+  --cyan:#6fd6e8;
+  --ok:#7fe0a0;
+  --warn:#ffcf6e;
+  --display:"Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --body:"Rubik", system-ui, -apple-system, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:15px;line-height:1.5;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px;display:flex;flex-direction:column;gap:40px}
+a{color:var(--cyan)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+/* header */
+header{display:flex;flex-direction:column;gap:10px}
+.marquee{font-family:var(--display);font-weight:700;font-size:clamp(40px,10vw,76px);line-height:.92;letter-spacing:-.01em;text-transform:uppercase;margin:0;text-wrap:balance}
+.marquee span{color:var(--amber);text-shadow:0 0 18px rgba(255,181,71,.35)}
+.sub{color:var(--muted);max-width:60ch;margin:0}
+.credits{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.credits b{color:var(--amber);font-weight:500}
+
+h2{font-family:var(--display);font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:500;display:flex;align-items:center;gap:10px}
+h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* featured cabinets */
+.featured{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
+.cab{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.screen{height:120px;position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+.screen canvas{width:100%;height:100%;display:block}
+.screen .engine{position:absolute;left:14px;bottom:10px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--fg);background:rgba(21,19,31,.75);padding:3px 8px;border-radius:5px}
+.cab-body{padding:18px;display:flex;flex-direction:column;gap:12px;flex:1}
+.cab h3{font-family:var(--display);font-size:28px;line-height:1;margin:0;text-transform:uppercase;letter-spacing:.01em}
+.cab p{margin:0;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.touch{color:var(--ok);border-color:rgba(127,224,160,.4)}
+.chip.pad{color:var(--warn);border-color:rgba(255,207,110,.4)}
+.steps{margin:0;padding-left:20px;color:var(--fg);display:flex;flex-direction:column;gap:4px;font-size:14px}
+.steps li::marker{color:var(--amber);font-family:var(--mono)}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
+.btn{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.04em;text-transform:uppercase;text-decoration:none;border-radius:10px;padding:12px 20px;display:inline-flex;align-items:center;gap:8px;border:1px solid transparent;cursor:pointer;min-height:48px}
+.btn.play{background:var(--amber);color:var(--amber-ink);box-shadow:0 4px 0 #b9761c}
+.btn.play:active{transform:translateY(3px);box-shadow:0 1px 0 #b9761c}
+.btn.ghost{background:transparent;color:var(--fg);border-color:var(--line);font-size:14px}
+
+/* built-in game strip */
+.house{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:18px}
+.house canvas{width:110px;height:176px;border-radius:8px;background:var(--bg);display:block}
+.house .info{display:flex;flex-direction:column;gap:10px;min-width:0}
+.house h3{font-family:var(--display);font-size:28px;margin:0;text-transform:uppercase;line-height:1}
+.house p{margin:0;color:var(--muted)}
+.best{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.best b{color:var(--amber);font-weight:500;font-variant-numeric:tabular-nums}
+@media (max-width:420px){.house{grid-template-columns:1fr}.house canvas{width:100%;height:120px}}
+
+/* rack */
+.rack{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:12px}
+.cart{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cart .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.cart h4{font-family:var(--display);font-size:19px;margin:0;text-transform:uppercase;letter-spacing:.02em}
+.cart .lic{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.cart p{margin:0;color:var(--muted);font-size:14px;flex:1}
+.cart .actions{padding-top:6px}
+.cart .btn{font-size:15px;padding:9px 16px;min-height:42px}
+.cart .btn.ghost{font-size:13px}
+
+.notes{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:18px}
+.notes h3{font-family:var(--display);font-size:16px;margin:0 0 6px;text-transform:uppercase;color:var(--amber)}
+.notes p{margin:0;color:var(--muted);font-size:14px}
+footer{color:var(--muted);font-size:12px;max-width:70ch}
+
+/* game overlay */
+#game{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column;padding-top:calc(env(safe-area-inset-top,0px) + 8px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px);padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));gap:10px;touch-action:none;user-select:none;-webkit-user-select:none}
+.hud{display:flex;align-items:center;gap:10px}
+.stat{display:flex;flex-direction:column;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+.stat b{font-size:18px;color:var(--fg);font-weight:500;letter-spacing:0;font-variant-numeric:tabular-nums}
+.hud .sp{flex:1}
+.icon-btn{width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:18px;display:grid;place-items:center;cursor:pointer;font-family:var(--display)}
+#nextc{width:56px;height:44px;border-radius:8px;background:var(--panel);border:1px solid var(--line)}
+.board-wrap{flex:1;min-height:0;display:grid;place-items:center;position:relative}
+#board{border-radius:6px;background:#0f0d18;border:1px solid var(--line);touch-action:none}
+.banner{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.banner div{pointer-events:auto;background:rgba(21,19,31,.92);border:1px solid var(--line);border-radius:14px;padding:20px 24px;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center;max-width:280px}
+.banner h3{font-family:var(--display);font-size:30px;margin:0;text-transform:uppercase;color:var(--amber);line-height:1}
+.banner p{margin:0;color:var(--muted);font-size:13px}
+.pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:460px;width:100%;margin:0 auto}
+.pad button{height:62px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font-size:22px;font-family:var(--display);touch-action:none;cursor:pointer}
+.pad button:active,.pad button.on{background:var(--amber);color:var(--amber-ink)}
+.pad small{display:block;font-size:9px;letter-spacing:.12em;color:inherit;opacity:.7;margin-top:2px;font-family:var(--mono)}
+
+/* in-site player */
+#player{position:fixed;inset:0;z-index:60;background:#0b0a10}
+#stageBox{position:absolute;inset:0;overflow:hidden;background:#0b0a10}
+#player iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:0;display:block;background:#0b0a10;transform-origin:0 0}
+#player.desk iframe{width:1280px;height:800px}
+#ptools{position:absolute;z-index:3;right:calc(10px + env(safe-area-inset-right,0px));top:calc(10px + env(safe-area-inset-top,0px));display:flex;gap:6px}
+.tbtn{height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:rgba(31,28,45,.88);color:var(--fg);font:500 12px var(--display);letter-spacing:.04em;cursor:pointer;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.tbtn[aria-pressed="true"]{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+.tbtn.close{width:34px;padding:0}
+#player.own-bar #ptools{display:none}
+#vkeys{position:absolute;z-index:3;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;
+  padding:10px max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));pointer-events:none}
+#vkeys>*{pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none}
+.dpad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,54px);gap:6px}
+.dpad .up{grid-column:2;grid-row:1}.dpad .left{grid-column:1;grid-row:2}.dpad .down{grid-column:2;grid-row:2}.dpad .right{grid-column:3;grid-row:2}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:60%}
+#vkeys button{min-width:54px;height:54px;padding:0 10px;border-radius:12px;border:1px solid rgba(165,159,189,.45);background:rgba(42,38,64,.72);color:var(--fg);font:600 13px var(--display);letter-spacing:.04em;cursor:pointer}
+#vkeys button.on{background:var(--amber);color:var(--amber-ink)}
+button.btn{font-family:var(--display)}
+@media (prefers-reduced-motion:reduce){.btn.play:active{transform:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="credits">Insert coin · <b>10 games</b> · all run on this site</div>
+    <h1 class="marquee">Pocket<br><span>Arcade</span></h1>
+    <p class="sub">Quake, Quake II and DOOM, an open-world block-building sandbox, a block-stacker of our own and five more open-source games from GitHub. Every one plays right here, with touch controls for iPhone.</p>
+  </header>
+
+  <section>
+    <h2>Specials</h2>
+    <div class="featured">
+      <article class="cab">
+        <div class="screen"><canvas data-scene="q1"></canvas><span class="engine">WebQuake · JavaScript</span></div>
+        <div class="cab-body">
+          <h3>Quake</h3>
+          <div class="chips"><span class="chip touch">Touch pad</span><span class="chip">Shareware · 8 levels</span><span class="chip">Autopilot</span></div>
+          <p>The 1996 original, running on WebQuake, a JavaScript port of the Quake engine from GitHub. Tap Play! and it unpacks id Software’s shareware release in your browser.</p>
+          <ol class="steps">
+            <li>Tap <b>Play!</b>, then Play! again.</li>
+            <li>Pick Single Player, New Game.</li>
+            <li>Try Complete Level (Visual) to watch the autopilot clear a level.</li>
+          </ol>
+          <div class="actions">
+            <button class="btn play" type="button" data-game="quake1">▶ Play!</button>
+            <a class="btn ghost" href="https://github.com/Triang3l/WebQuake" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </article>
+      <article class="cab">
+        <div class="screen"><canvas data-scene="q2"></canvas><span class="engine">Qwasm2 · Yamagi Quake II → WASM</span></div>
+        <div class="cab-body">
+          <h3>Quake II</h3>
+          <div class="chips"><span class="chip touch">Touch pad</span><span class="chip">WebGL 2</span><span class="chip">Demo · 3 levels</span></div>
+          <p>The full Quake II engine runs on this page. Tap Play! and it unpacks id Software’s original demo installer in your browser, then drops you into Outer Base.</p>
+          <ol class="steps">
+            <li>Tap <b>Play!</b></li>
+            <li>Tap Play! again and wait for the 37 MB download.</li>
+            <li>Own the full game? Load your pak0.pak instead.</li>
+          </ol>
+          <div class="actions">
+            <button class="btn play" type="button" data-game="quake2">▶ Play!</button>
+            <a class="btn ghost" href="https://github.com/GMH-Code/Qwasm2" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </article>
+      <article class="cab">
+        <div class="screen"><canvas data-scene="voxel"></canvas><span class="engine">three.js · procedural world</span></div>
+        <div class="cab-body">
+          <h3>Voxel Sandbox</h3>
+          <div class="chips"><span class="chip touch">Touch pad</span><span class="chip">Build &amp; break</span><span class="chip">Auto-saves</span></div>
+          <p>An open-world block-building sandbox with oceans you can swim in, snowy mountains, pine forests, glowing crystal veins and a full day and night sky. Break and place 13 kinds of blocks; your world saves on this phone.</p>
+          <ol class="steps">
+            <li>Tap <b>Play!</b>, then Tap to Play.</li>
+            <li>Stick walks, drag anywhere to look.</li>
+            <li>Break, Place, Jump, and Fly to soar.</li>
+          </ol>
+          <div class="actions">
+            <button class="btn play" type="button" data-game="voxel">▶ Play!</button>
+            <a class="btn ghost" href="https://github.com/freaxnx01/game-voxel-sandbox" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>All games</h2>
+    <div class="rack">
+      <div class="cart">
+        <div class="top"><h4>Quake</h4><span class="lic">GPL · JS</span></div>
+        <div class="chips"><span class="chip touch">Touch pad</span></div>
+        <p>The 1996 original on WebQuake: the shareware episode, with a real autopilot that hunts monsters and walks into the exit.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="quake1">▶ Play!</button><a class="btn ghost" href="https://github.com/Triang3l/WebQuake" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>Quake II</h4><span class="lic">GPL · WASM</span></div>
+        <div class="chips"><span class="chip touch">Touch pad</span></div>
+        <p>The id Software shooter on the Yamagi engine. Plays the 3-level demo, or your own full-game pak files.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="quake2">▶ Play!</button><a class="btn ghost" href="https://github.com/GMH-Code/Qwasm2" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>DOOM</h4><span class="lic">GPL · WASM</span></div>
+        <div class="chips"><span class="chip touch">Touch pad</span></div>
+        <p>The real shareware episode, Knee-Deep in the Dead, on the Chocolate Doom engine. Freedoom and your own WADs work too.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="doom">▶ Play!</button></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>Voxel Sandbox</h4><span class="lic">MIT · three.js</span></div>
+        <div class="chips"><span class="chip touch">Touch pad</span></div>
+        <p>Open-world block building with oceans, mountains, glowing crystals and day and night.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="voxel">▶ Play!</button><a class="btn ghost" href="https://github.com/freaxnx01/game-voxel-sandbox" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>Blockfall</h4><span class="lic">Original · JS</span></div>
+        <div class="chips"><span class="chip touch">Swipe or buttons</span></div>
+        <p>Our own falling-block puzzler. Swipe to move, tap to rotate, flick down to drop. Best on this phone: <b id="bestLbl">0</b></p>
+        <div class="actions"><button class="btn play" id="startBtn" type="button">▶ Play!</button></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>HexGL</h4><span class="lic">MIT · WebGL</span></div>
+        <div class="chips"><span class="chip touch">Touch ready</span></div>
+        <p>A futuristic anti-gravity racer built with three.js. Pick Controls: Touch on the start screen.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="hexgl">▶ Play!</button><a class="btn ghost" href="https://github.com/BKcore/HexGL" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>Hextris</h4><span class="lic">GPL · JS</span></div>
+        <div class="chips"><span class="chip touch">Touch ready</span></div>
+        <p>Blocks fall toward a spinning hexagon. Tap left or right to rotate it and match colors.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="hextris">▶ Play!</button><a class="btn ghost" href="https://github.com/hextris/hextris" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>2048</h4><span class="lic">MIT · JS</span></div>
+        <div class="chips"><span class="chip touch">Swipe</span></div>
+        <p>Swipe to slide numbered tiles and merge them until you reach 2048.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="2048">▶ Play!</button><a class="btn ghost" href="https://github.com/gabrielecirulli/2048" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>A Dark Room</h4><span class="lic">MPL · JS</span></div>
+        <div class="chips"><span class="chip touch">Touch ready</span></div>
+        <p>A minimalist text adventure that starts with lighting a fire and keeps unfolding.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="adarkroom">▶ Play!</button><a class="btn ghost" href="https://github.com/doublespeakgames/adarkroom" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+      <div class="cart">
+        <div class="top"><h4>Clumsy Bird</h4><span class="lic">GPL · melonJS</span></div>
+        <div class="chips"><span class="chip touch">Tap to flap</span></div>
+        <p>A one-button flapping game. Tap to stay airborne between the pipes.</p>
+        <div class="actions"><button class="btn play" type="button" data-game="clumsy-bird">▶ Play!</button><a class="btn ghost" href="https://github.com/ellisonleao/clumsy-bird" target="_blank" rel="noopener">GitHub</a></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Playing on iPhone</h2>
+    <div class="notes">
+      <div><h3>No files needed</h3><p>Quake, DOOM and Quake II ship as id Software’s original, unmodified shareware and demo archives. Your browser unpacks them when you tap Play!, so there is nothing to download or extract yourself.</p></div>
+      <div><h3>Touch controls</h3><p>Turn the phone sideways. The left stick moves, the right half of the screen looks around in Quake II, and the big red button fires. Bluetooth controllers and keyboards also work.</p></div>
+      <div><h3>Saves stay put</h3><p>Game saves and settings are stored in Safari on this phone. Quake II downloads 37 MB each visit, so use Wi-Fi.</p></div>
+    </div>
+  </section>
+
+  <footer>Every game runs from this site. Engines and games keep their own open-source licences (GPL, MIT, BSD, MPL); Freedoom is BSD-licensed. Shareware DOOM and the Quake II demo are id Software’s original, unmodified archives, unpacked in your browser. Pocket Arcade is not affiliated with id Software, Bethesda or any listed developer. Game names belong to their owners.</footer>
+</div>
+
+<div id="player" hidden>
+  <div id="stageBox"><iframe id="playerFrame" title="Game" allow="fullscreen; autoplay; gamepad; screen-wake-lock" allowfullscreen></iframe></div>
+  <div id="ptools">
+    <button class="tbtn" id="keysBtn" type="button" aria-pressed="false">⌨ Keys</button>
+    <button class="tbtn" id="deskBtn" type="button" aria-pressed="false">🖥 Desktop</button>
+    <button class="tbtn close" id="playerClose" type="button" aria-label="Back to the arcade">✕</button>
+  </div>
+  <div id="vkeys" hidden>
+    <div class="dpad">
+      <button type="button" class="k up" data-k="up">▲</button>
+      <button type="button" class="k left" data-k="left">◀</button>
+      <button type="button" class="k down" data-k="down">▼</button>
+      <button type="button" class="k right" data-k="right">▶</button>
+    </div>
+    <div class="acts" id="vacts"></div>
+  </div>
+</div>
+
+<div id="game" hidden>
+  <div class="hud">
+    <button class="icon-btn" id="closeBtn" type="button" aria-label="Close game">✕</button>
+    <div class="stat">Score<b id="sScore">0</b></div>
+    <div class="stat">Lines<b id="sLines">0</b></div>
+    <div class="stat">Level<b id="sLevel">1</b></div>
+    <span class="sp"></span>
+    <canvas id="nextc" width="112" height="88" aria-label="Next piece"></canvas>
+    <button class="icon-btn" id="pauseBtn" type="button" aria-label="Pause">❚❚</button>
+  </div>
+  <div class="board-wrap" id="boardWrap">
+    <canvas id="board"></canvas>
+    <div class="banner" id="banner" hidden><div><h3 id="bTitle">Paused</h3><p id="bText"></p><button class="btn play" id="bBtn" type="button">Resume</button></div></div>
+  </div>
+  <div class="pad">
+    <button type="button" data-a="left" aria-label="Move left">◀<small>LEFT</small></button>
+    <button type="button" data-a="rot" aria-label="Rotate">⟳<small>TURN</small></button>
+    <button type="button" data-a="drop" aria-label="Hard drop">⤓<small>DROP</small></button>
+    <button type="button" data-a="down" aria-label="Soft drop">▼<small>DOWN</small></button>
+    <button type="button" data-a="right" aria-label="Move right">▶<small>RIGHT</small></button>
+  </div>
+</div>
+
+<script>
+(()=>{
+/* ---------- decorative cabinet screens (generic, no game art) ---------- */
+function scene(c){
+  const kind=c.dataset.scene, r=c.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  c.width=Math.max(1,r.width*d); c.height=Math.max(1,r.height*d);
+  const x=c.getContext('2d'), w=c.width, h=c.height;
+  if(kind==='voxel'){
+    const sky=x.createLinearGradient(0,0,0,h);sky.addColorStop(0,'#6fb2e8');sky.addColorStop(1,'#bfe2f7');x.fillStyle=sky;x.fillRect(0,0,w,h);
+    const b=Math.max(8,Math.round(h/9));let seed=7;const rnd=()=>(seed=(seed*9301+49297)%233280)/233280;
+    for(let col=0;col*b<w;col++){const top=Math.round(h*0.45/b+Math.sin(col*0.45)*1.6+Math.sin(col*0.17)*1.2);
+      for(let row=top;row*b<h;row++){x.fillStyle=row===top?'#5fae3c':(row<top+3?'#8a5a34':'#7d7f86');x.fillRect(col*b,row*b,b-1,b-1);
+        if(row===top){x.fillStyle='rgba(255,255,255,.12)';x.fillRect(col*b,row*b,b-1,Math.max(2,b*0.2));}}
+      if(rnd()<0.18){x.fillStyle='#6b4a2b';x.fillRect(col*b,(top-2)*b,b-1,2*b-1);x.fillStyle='#2f7a35';x.fillRect((col-1)*b,(top-4)*b,3*b-1,2*b-1);}}
+    return;
+  }
+  const g=x.createLinearGradient(0,0,0,h);
+  if(kind==='q2'){g.addColorStop(0,'#3a2a20');g.addColorStop(1,'#120c10');}
+  else if(kind==='q1'){g.addColorStop(0,'#2e2a1c');g.addColorStop(1,'#0e0c08');}
+  else{g.addColorStop(0,'#4a1616');g.addColorStop(1,'#140808');}
+  x.fillStyle=g;x.fillRect(0,0,w,h);
+  // perspective corridor floor grid
+  const hz=h*0.42, cx=w*0.5;
+  x.strokeStyle=kind==='q2'?'rgba(255,181,71,.35)':'rgba(255,120,80,.35)';x.lineWidth=d;
+  for(let i=-12;i<=12;i++){x.beginPath();x.moveTo(cx+i*w*0.02,hz);x.lineTo(cx+i*w*0.18,h);x.stroke();}
+  for(let j=1;j<9;j++){const y=hz+(h-hz)*Math.pow(j/8,2);x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke();}
+  // walls
+  x.fillStyle='rgba(0,0,0,.35)';
+  x.beginPath();x.moveTo(0,0);x.lineTo(cx-w*0.12,hz*0.7);x.lineTo(cx-w*0.12,hz);x.lineTo(0,h);x.fill();
+  x.beginPath();x.moveTo(w,0);x.lineTo(cx+w*0.12,hz*0.7);x.lineTo(cx+w*0.12,hz);x.lineTo(w,h);x.fill();
+  // glow at the end of the hall
+  const rg=x.createRadialGradient(cx,hz*0.85,1,cx,hz*0.85,w*0.18);
+  rg.addColorStop(0,kind==='q2'?'rgba(111,214,232,.8)':'rgba(255,200,90,.85)');rg.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=rg;x.fillRect(0,0,w,h);
+  // scanlines
+  x.fillStyle='rgba(0,0,0,.18)';for(let y=0;y<h;y+=3*d)x.fillRect(0,y,w,d);
+}
+const scenes=[...document.querySelectorAll('canvas[data-scene]')];
+const drawScenes=()=>scenes.forEach(scene); drawScenes(); addEventListener('resize',drawScenes);
+
+/* ---------- Blockfall ---------- */
+const COLS=10, ROWS=20;
+const COLORS={I:'#6fd6e8',O:'#ffd166',T:'#c38bff',S:'#7fe0a0',Z:'#ff7a7a',J:'#7aa2ff',L:'#ffb547'};
+const SHAPES={I:[[0,1],[1,1],[2,1],[3,1]],O:[[1,0],[2,0],[1,1],[2,1]],T:[[1,0],[0,1],[1,1],[2,1]],S:[[1,0],[2,0],[0,1],[1,1]],Z:[[0,0],[1,0],[1,1],[2,1]],J:[[0,0],[0,1],[1,1],[2,1]],L:[[2,0],[0,1],[1,1],[2,1]]};
+const SIZE={I:4,O:4,T:3,S:3,Z:3,J:3,L:3};
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let best=+(store.get('blockfall-best')||0);
+const bestLbl=document.getElementById('bestLbl'); bestLbl.textContent=best.toLocaleString();
+
+let grid,cur,nextQ,bag,score,lines,level,dropAcc,lastT,running=false,paused=false,over=false,raf;
+const $=id=>document.getElementById(id);
+const board=$('board'),bx=board.getContext('2d'),nc=$('nextc'),nx=nc.getContext('2d');
+let cell=24;
+
+function refill(){bag='IOTSZJL'.split('');for(let i=bag.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[bag[i],bag[j]]=[bag[j],bag[i]];}}
+function take(){if(!bag.length)refill();return bag.pop();}
+function piece(t){return{t,cells:SHAPES[t].map(c=>c.slice()),x:3,y:t==='I'?-1:0};}
+function rotated(p){const n=SIZE[p.t];if(p.t==='O')return p.cells.map(c=>c.slice());return p.cells.map(([x,y])=>[n-1-y,x]);}
+function fits(cells,ox,oy){return cells.every(([x,y])=>{const X=x+ox,Y=y+oy;return X>=0&&X<COLS&&Y<ROWS&&(Y<0||!grid[Y][X]);});}
+function spawn(){cur=piece(nextQ);nextQ=take();if(!fits(cur.cells,cur.x,cur.y)){endGame();}drawNext();}
+function reset(){grid=Array.from({length:ROWS},()=>Array(COLS).fill(null));refill();nextQ=take();score=0;lines=0;level=1;dropAcc=0;over=false;spawn();hud();}
+function speed(){return Math.max(60,800*Math.pow(0.85,level-1));}
+function move(dx){if(fits(cur.cells,cur.x+dx,cur.y)){cur.x+=dx;return true}return false;}
+function rotate(){const r=rotated(cur);for(const k of[0,-1,1,-2,2]){if(fits(r,cur.x+k,cur.y)){cur.cells=r;cur.x+=k;return;}}if(fits(r,cur.x,cur.y-1)){cur.cells=r;cur.y--;}}
+function soft(){if(fits(cur.cells,cur.x,cur.y+1)){cur.y++;score+=1;hud();return true}lock();return false;}
+function hard(){let n=0;while(fits(cur.cells,cur.x,cur.y+1)){cur.y++;n++;}score+=n*2;lock();}
+function lock(){
+  for(const[x,y]of cur.cells){const Y=y+cur.y;if(Y<0){endGame();return;}grid[Y][x+cur.x]=cur.t;}
+  let cleared=0;for(let r=ROWS-1;r>=0;r--){if(grid[r].every(Boolean)){grid.splice(r,1);grid.unshift(Array(COLS).fill(null));cleared++;r++;}}
+  if(cleared){score+=[0,100,300,500,800][cleared]*level;lines+=cleared;level=1+Math.floor(lines/10);if(navigator.vibrate)try{navigator.vibrate(15)}catch(e){}}
+  dropAcc=0;hud();if(!over)spawn();
+}
+function ghostY(){let y=cur.y;while(fits(cur.cells,cur.x,y+1))y++;return y;}
+function hud(){$('sScore').textContent=score.toLocaleString();$('sLines').textContent=lines;$('sLevel').textContent=level;}
+
+function block(ctx,x,y,s,col,alpha){
+  ctx.globalAlpha=alpha??1;ctx.fillStyle=col;ctx.fillRect(x+1,y+1,s-2,s-2);
+  ctx.fillStyle='rgba(255,255,255,.28)';ctx.fillRect(x+1,y+1,s-2,Math.max(2,s*0.18));
+  ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(x+1,y+s-1-Math.max(2,s*0.14),s-2,Math.max(2,s*0.14));
+  ctx.globalAlpha=1;
+}
+function fit(){
+  const wrap=$('boardWrap').getBoundingClientRect();
+  cell=Math.max(10,Math.floor(Math.min((wrap.width-4)/COLS,(wrap.height-4)/ROWS)));
+  const d=window.devicePixelRatio||1;
+  board.style.width=cell*COLS+'px';board.style.height=cell*ROWS+'px';
+  board.width=cell*COLS*d;board.height=cell*ROWS*d;bx.setTransform(d,0,0,d,0,0);
+  draw();
+}
+function draw(){
+  if(!grid)return;
+  bx.fillStyle='#0f0d18';bx.fillRect(0,0,cell*COLS,cell*ROWS);
+  bx.strokeStyle='rgba(165,159,189,.07)';bx.lineWidth=1;
+  for(let i=1;i<COLS;i++){bx.beginPath();bx.moveTo(i*cell+.5,0);bx.lineTo(i*cell+.5,cell*ROWS);bx.stroke();}
+  for(let j=1;j<ROWS;j++){bx.beginPath();bx.moveTo(0,j*cell+.5);bx.lineTo(cell*COLS,j*cell+.5);bx.stroke();}
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)if(grid[y][x])block(bx,x*cell,y*cell,cell,COLORS[grid[y][x]]);
+  if(cur&&!over){
+    const gy=ghostY();
+    for(const[x,y]of cur.cells){const Y=y+gy;if(Y>=0){bx.strokeStyle=COLORS[cur.t];bx.globalAlpha=.45;bx.strokeRect((x+cur.x)*cell+2.5,Y*cell+2.5,cell-5,cell-5);bx.globalAlpha=1;}}
+    for(const[x,y]of cur.cells){const Y=y+cur.y;if(Y>=0)block(bx,(x+cur.x)*cell,Y*cell,cell,COLORS[cur.t]);}
+  }
+}
+function drawNext(){
+  nx.clearRect(0,0,nc.width,nc.height);const s=20,cs=SHAPES[nextQ];
+  const xs=cs.map(c=>c[0]),ys=cs.map(c=>c[1]);const w=(Math.max(...xs)-Math.min(...xs)+1)*s,h=(Math.max(...ys)-Math.min(...ys)+1)*s;
+  const ox=(nc.width-w)/2-Math.min(...xs)*s,oy=(nc.height-h)/2-Math.min(...ys)*s;
+  for(const[x,y]of cs)block(nx,ox+x*s,oy+y*s,s,COLORS[nextQ]);
+}
+function loop(t){
+  if(!running)return;
+  const dt=Math.min(100,t-(lastT||t));lastT=t;
+  if(!paused&&!over){dropAcc+=dt;if(dropAcc>=speed()){dropAcc=0;if(fits(cur.cells,cur.x,cur.y+1))cur.y++;else lock();}}
+  draw();raf=requestAnimationFrame(loop);
+}
+function banner(title,text,btn,show){$('banner').hidden=!show;$('bTitle').textContent=title;$('bText').textContent=text;$('bBtn').textContent=btn;}
+function setPause(p){if(over)return;paused=p;banner('Paused','Tap resume to keep stacking.','Resume',p);}
+function endGame(){over=true;if(score>best){best=score;store.set('blockfall-best',String(best));bestLbl.textContent=best.toLocaleString();}
+  banner('Game over',`Score ${score.toLocaleString()} · ${lines} lines · best ${best.toLocaleString()}`,'Play again',true);}
+
+function open(){$('game').hidden=false;document.documentElement.style.overflow='hidden';reset();paused=false;banner('','','',false);running=true;lastT=0;fit();cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+  try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}}
+function close(){running=false;cancelAnimationFrame(raf);$('game').hidden=true;document.documentElement.style.overflow='';}
+$('startBtn').addEventListener('click',open);
+$('closeBtn').addEventListener('click',close);
+$('pauseBtn').addEventListener('click',()=>setPause(!paused));
+$('bBtn').addEventListener('click',()=>{if(over){reset();banner('','','',false);}else setPause(false);});
+addEventListener('resize',()=>{if(running)fit();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&running&&!over)setPause(true);});
+
+function act(a){if(!running||paused||over)return;
+  if(a==='left')move(-1);else if(a==='right')move(1);else if(a==='rot')rotate();else if(a==='down')soft();else if(a==='drop')hard();draw();}
+
+// on-screen pad with hold-to-repeat
+document.querySelectorAll('.pad button').forEach(b=>{
+  let t1,t2;const a=b.dataset.a,rep=a==='left'||a==='right'||a==='down';
+  const stop=()=>{clearTimeout(t1);clearInterval(t2);b.classList.remove('on');};
+  b.addEventListener('pointerdown',e=>{e.preventDefault();b.classList.add('on');act(a);if(rep){t1=setTimeout(()=>{t2=setInterval(()=>act(a),a==='down'?40:60);},170);}});
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,stop));
+});
+// gestures on the board: tap = rotate, drag = move, fast flick down = drop
+let sx,sy,st,lastCol,lastRow,moved;
+board.addEventListener('pointerdown',e=>{e.preventDefault();sx=e.clientX;sy=e.clientY;st=performance.now();lastCol=0;lastRow=0;moved=false;board.setPointerCapture(e.pointerId);});
+board.addEventListener('pointermove',e=>{if(sx==null)return;const dx=e.clientX-sx,dy=e.clientY-sy;
+  const col=Math.trunc(dx/(cell*0.9));while(col>lastCol){act('right');lastCol++;moved=true;}while(col<lastCol){act('left');lastCol--;moved=true;}
+  const row=Math.trunc(dy/(cell*0.9));if(Math.abs(dx)<Math.abs(dy))while(row>lastRow){act('down');lastRow++;moved=true;}});
+board.addEventListener('pointerup',e=>{if(sx==null)return;const dt=performance.now()-st,dy=e.clientY-sy,dx=e.clientX-sx;
+  if(dy>60&&dt<220&&Math.abs(dy)>Math.abs(dx))act('drop');else if(!moved&&Math.abs(dx)<10&&Math.abs(dy)<10)act('rot');sx=null;});
+board.addEventListener('pointercancel',()=>{sx=null;});
+// keyboard
+addEventListener('keydown',e=>{if(!running)return;const k=e.key;
+  const m={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'rot',x:'rot',ArrowDown:'down',' ':'drop'}[k];
+  if(m){e.preventDefault();act(m);}else if(k==='p'||k==='Escape')setPause(!paused);});
+
+
+/* ---------- in-site player ---------- */
+const GAMES={quake1:'quake1/index.html',quake2:'quake2/index.html',voxel:'games/voxel-sandbox/index.html',doom:'doom/index.html',hexgl:'games/hexgl/index.html',hextris:'games/hextris/index.html','2048':'games/2048/index.html',adarkroom:'games/adarkroom/index.html?ignorebrowser=true','clumsy-bird':'games/clumsy-bird/index.html'};
+const OWN_BAR={quake1:1,quake2:1,doom:1};
+/* Keyboard commands each desktop game expects. dpad: arrow keys. acts: extra buttons [label,key,mode]. */
+const CONTROLS={
+  '2048':{dpad:true,acts:[]},
+  hextris:{dpad:true,acts:[['Start','enter','tap'],['Pause','p','tap'],['Speed','down','hold']]},
+  hexgl:{dpad:true,acts:[['◀ Brake','a','hold'],['Brake ▶','d','hold']]},
+  'clumsy-bird':{dpad:false,acts:[['Flap','space','tap'],['Enter','enter','tap']]},
+  adarkroom:{dpad:false,acts:[]},
+  voxel:{dpad:true,acts:[['Jump','space','hold'],['Fly','f','tap'],['Break','q','tap'],['Place','e','tap']]}
+};
+const DESK_DEFAULT={adarkroom:true};
+const VK={up:['ArrowUp','ArrowUp',38],down:['ArrowDown','ArrowDown',40],left:['ArrowLeft','ArrowLeft',37],right:['ArrowRight','ArrowRight',39],
+  space:[' ','Space',32],enter:['Enter','Enter',13],p:['p','KeyP',80],a:['a','KeyA',65],d:['d','KeyD',68],q:['q','KeyQ',81],e:['e','KeyE',69],f:['f','KeyF',70]};
+const player=$('player'),frame=$('playerFrame'),stageBox=$('stageBox'),vkeys=$('vkeys');
+let current=null;
+function sendKey(type,name){
+  const k=VK[name]; if(!k)return;
+  let w,d; try{w=frame.contentWindow;d=w.document;}catch(e){return;}
+  let ev; try{ev=new w.KeyboardEvent(type,{key:k[0],code:k[1],bubbles:true,cancelable:true});}catch(e){return;}
+  try{Object.defineProperty(ev,'keyCode',{get:()=>k[2]});Object.defineProperty(ev,'which',{get:()=>k[2]});Object.defineProperty(ev,'charCode',{get:()=>type==='keypress'?k[2]:0});}catch(e){}
+  const t=d.activeElement&&d.activeElement!==d.body?d.activeElement:(d.body||d);
+  t.dispatchEvent(ev);
+}
+function bindKey(btn,name,mode){
+  const down=e=>{e.preventDefault();btn.classList.add('on');sendKey('keydown',name);if(name==='space'||name==='enter')sendKey('keypress',name);if(mode==='tap')setTimeout(()=>{sendKey('keyup',name);btn.classList.remove('on');},90);};
+  const up=()=>{if(mode==='tap')return;if(!btn.classList.contains('on'))return;btn.classList.remove('on');sendKey('keyup',name);};
+  btn.addEventListener('pointerdown',down);['pointerup','pointercancel','pointerleave'].forEach(t=>btn.addEventListener(t,up));
+  btn.addEventListener('contextmenu',e=>e.preventDefault());
+}
+vkeys.querySelectorAll('.dpad [data-k]').forEach(b=>bindKey(b,b.dataset.k,'hold'));
+function setKeys(on){
+  const c=CONTROLS[current]||{dpad:true,acts:[['Space','space','hold'],['Enter','enter','tap']]};
+  vkeys.hidden=!on; $('keysBtn').setAttribute('aria-pressed',on);
+  vkeys.querySelector('.dpad').hidden=!c.dpad;
+  const acts=$('vacts'); acts.innerHTML='';
+  c.acts.forEach(([label,key,mode])=>{const b=document.createElement('button');b.type='button';b.textContent=label;bindKey(b,key,mode);acts.appendChild(b);});
+}
+function fitDesk(){
+  if(!player.classList.contains('desk')){frame.style.transform='';return;}
+  const r=stageBox.getBoundingClientRect(),sc=Math.min(r.width/1280,r.height/800);
+  frame.style.transform='translate('+Math.max(0,(r.width-1280*sc)/2)+'px,'+Math.max(0,(r.height-800*sc)/2)+'px) scale('+sc+')';
+}
+function setDesk(on){player.classList.toggle('desk',on);$('deskBtn').setAttribute('aria-pressed',on);fitDesk();}
+addEventListener('resize',fitDesk);
+frame.addEventListener('load',fitDesk);
+$('keysBtn').addEventListener('click',()=>setKeys(vkeys.hidden));
+$('deskBtn').addEventListener('click',()=>setDesk(!player.classList.contains('desk')));
+const touchDevice=matchMedia('(pointer: coarse)').matches||'ontouchstart' in window;
+function openGame(id){
+  if(!GAMES[id])return;
+  if(running)close();
+  current=id;
+  player.classList.toggle('own-bar',!!OWN_BAR[id]);
+  setDesk(!!DESK_DEFAULT[id]);
+  setKeys(touchDevice&&!!CONTROLS[id]&&CONTROLS[id].acts.length+(CONTROLS[id].dpad?1:0)>0&&id!=='voxel'&&id!=='2048');
+  frame.src=GAMES[id];player.hidden=false;document.documentElement.style.overflow='hidden';
+  requestAnimationFrame(fitDesk);
+  if(location.hash!=='#'+id){try{history.replaceState(null,'','#'+id)}catch(e){location.hash=id}}
+  setTimeout(()=>{try{frame.focus()}catch(e){}},300);
+}
+function closeGame(){
+  if(player.hidden)return;
+  player.hidden=true;vkeys.hidden=true;frame.src='about:blank';document.documentElement.style.overflow='';current=null;
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
+}
+document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
+$('playerClose').addEventListener('click',closeGame);
+addEventListener('message',e=>{if(e.data&&e.data.pocketArcade==='close')closeGame();});
+function route(){const id=location.hash.slice(1);if(GAMES[id])openGame(id);}
+addEventListener('hashchange',route);route();
+/* attract-mode preview on the page */
+(function attract(){
+  const c=$('attract');if(!c)return;const x=c.getContext('2d'),d=window.devicePixelRatio||1;
+  const sizeIt=()=>{const r=c.getBoundingClientRect();c.width=r.width*d;c.height=r.height*d;};sizeIt();addEventListener('resize',sizeIt);
+  const cols=['I','O','T','S','Z','J','L'];let stack=[],fall=null,tick=0;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame(){
+    const s=Math.floor(Math.min(c.width/8,c.height/12)),W=8,H=Math.floor(c.height/s);
+    x.fillStyle='#15131f';x.fillRect(0,0,c.width,c.height);
+    const ox=(c.width-W*s)/2;
+    if(!fall){fall={t:cols[Math.random()*7|0],x:Math.random()*5|0,y:-2};}
+    if(!reduce&&++tick%14===0){fall.y++;const bottom=fall.y+2;const hit=SHAPES[fall.t].some(([px,py])=>{const Y=py+fall.y+1,X=px+fall.x;return Y>=H||stack.some(b=>b.x===X&&b.y===Y);});
+      if(hit){SHAPES[fall.t].forEach(([px,py])=>stack.push({x:px+fall.x,y:py+fall.y,t:fall.t}));fall=null;if(stack.some(b=>b.y<3))stack=[];}}
+    stack.forEach(b=>block(x,ox+b.x*s,b.y*s,s,COLORS[b.t]));
+    if(fall)SHAPES[fall.t].forEach(([px,py])=>block(x,ox+(px+fall.x)*s,(py+fall.y)*s,s,COLORS[fall.t]));
+    if(reduce&&!stack.length){[[0,'I'],[4,'O'],[2,'T']].forEach(([X,t],i)=>SHAPES[t].forEach(([px,py])=>block(x,ox+(px+X)*s,(py+H-2-i)*s,s,COLORS[t])));}
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+})();
+</script>

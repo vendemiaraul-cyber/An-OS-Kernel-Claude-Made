@@ -1,0 +1,22 @@
+Bundled guest operating systems in Kernel Lab (free software; licences next to each):
+
+linux.bzimage  Linux 6.6 (i386) with a built-in initramfs, built by ConMon Lab
+  kernel   https://github.com/torvalds/linux  tag v6.6       licence GPL-2.0 (LICENSE-linux.txt)
+  busybox  https://github.com/mirror/busybox  tag 1_36_1     licence GPL-2.0 (LICENSE-busybox.txt)
+  musl     https://github.com/kraj/musl (mirror of git.musl-libc.org)  tag v1.2.5  licence MIT (LICENSE-musl.txt)
+  The exact configs, root filesystem files and build script are in the
+  ConMon Lab repo under tools/linux/ (sh tools/linux/build.sh rebuilds it).
+linux-desktop.bzimage  the same Linux 6.6, BusyBox and musl, plus Nano-X
+  nano-X   https://github.com/ghaerr/microwindows  commit 1cfb069  licence MPL-1.1 or GPL-2.0 (LICENSE-nanox.txt)
+  ConMon Lab's changes are tools/linux/desktop/nanox-conmon.patch in the repo;
+  tools/linux/desktop/build.sh rebuilds the image.
+mikeos.flp  https://github.com/mig-hub/mikeOS  commit 685306a  licence BSD-3-Clause (LICENSE-*.txt)
+tetros.img  https://github.com/daniel-e/tetros  commit 924f0d7  licence MIT (LICENSE-*.txt)
+bootbasic.img  https://github.com/nanochess/bootBASIC  commit b2eba2b  licence BSD-2-Clause (LICENSE-*.txt)
+bootos.img  https://github.com/nanochess/bootOS  commit e54fffe  licence BSD-2-Clause (LICENSE-*.txt)
+sectorlisp.img  https://github.com/jart/sectorlisp  commit 162c845  licence ISC (LICENSE-*.txt)
+
+Change: mikeos.flp also holds DOOM.BAS (ConMon Lab, MIT), a MikeOS BASIC
+program that asks the page to open DOOM in a window. Its source is
+tools/doom.bas in the ConMon Lab repo; tools/fat12_add.py puts it on the floppy:
+    python3 tools/fat12_add.py site/guests/mikeos.flp tools/doom.bas DOOM.BAS
