@@ -18,12 +18,20 @@
     <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="DOOM screen"></canvas>
 
     <div class="pad" id="pad">
-      <div class="stick" id="stick" aria-label="Move and turn"><div class="knob"></div></div>
+      <div class="arrows" aria-label="Move and turn">
+        <button type="button" data-key="comma">⇤<small>STRAFE</small></button>
+        <button type="button" data-key="up">▲<small>GO</small></button>
+        <button type="button" data-key="period">⇥<small>STRAFE</small></button>
+        <button type="button" data-key="left">◀<small>TURN</small></button>
+        <button type="button" data-key="down">▼<small>BACK</small></button>
+        <button type="button" data-key="right">▶<small>TURN</small></button>
+      </div>
       <div class="row">
         <button type="button" data-key="esc" data-mode="tap">Menu</button>
         <button type="button" data-key="enter" data-mode="tap">Enter</button>
         <button type="button" data-key="y" data-mode="tap">Yes</button>
         <button type="button" data-key="tab" data-mode="tap">Map</button>
+        <button type="button" class="cheat" id="cheat">Complete level</button>
       </div>
       <div class="btns">
         <button type="button" data-key="space">Use</button>
@@ -32,6 +40,7 @@
       </div>
       <span class="portrait-hint">Turn your phone sideways</span>
     </div>
+    <div class="toast" id="toast"></div>
 
 
     <div class="gate" id="gate">
@@ -47,7 +56,7 @@
         <div class="meter"><i id="meter"></i></div>
         <p class="small" id="dl">Loading the engine…</p>
         <button class="bigbtn" id="play" type="button" disabled>Loading…</button>
-        <p class="small">Touch: the stick moves and turns, then Fire, Use and Weapon. Menu, Enter and Yes work the menus. Keyboards and controllers work as on PC.</p>
+        <p class="small">Touch: arrow buttons move, turn and strafe, then Fire, Use and Weapon. Menu, Enter and Yes work the menus. Complete level warps to the next map. Keyboards and controllers work as on PC.</p>
         <pre class="log" id="log" hidden></pre>
         <p class="small">Engine: Chocolate Doom, GPL-2.0 (<a href="https://github.com/dzod992-bit/freedoom-web/tree/main/source" target="_blank" rel="noopener">source</a>). Shareware DOOM is served as id Software's unmodified <a href="../originals/doom19s.zip">doom19s.zip</a>. Freedoom is BSD-3-Clause.</p>
       </div>
@@ -130,7 +139,7 @@
     var ac=doom.SDL2&&doom.SDL2.audioContext; if(ac&&ac.state==='suspended') ac.resume().catch(function(){});
     try{
       var w=await getWad(choice);
-      doom.FS.writeFile(w.path,w.data); w.data=null;
+      doom.FS.writeFile(w.path,w.data); w.data=null; level.doom2=/doom2|freedoom2|tnt|plutonia/.test(w.path); level.ep=1; level.map=1;
       $('gate').hidden=true; canvas.focus({preventScroll:true}); status.textContent='Starting…';
       doom.callMain(['-iwad',w.path,'-savedir','/persist','-config','/persist/default.cfg','-extraconfig','/persist/chocolate-doom.cfg','-window','-novert','-nogui'].concat(w.args));
     }catch(e){ if(!(e&&e.name==='ExitStatus')) fail(e); }
@@ -146,7 +155,32 @@
   fit(); addEventListener('resize',fit); setInterval(fit,1000);
 
   TouchKit.bind($('pad'));
-  TouchKit.stick($('stick'),{up:'up',down:'down',left:'left',right:'right'},0.35);
+  $('pad').addEventListener('touchstart',function(e){ if(e.target===this) e.preventDefault(); },{passive:false});
+
+  /* Cheat: complete level. Types the game's own IDCLEV warp code for the next map.
+     The engine does not report the current level, so the page counts from the first map. */
+  var level={doom2:false,ep:1,map:1}, cheating=false;
+  function toast(msg){ var t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(function(){t.classList.remove('show')},2600); }
+  function nextLevel(){
+    if(level.doom2){
+      var m=level.map; if(m===31||m===32) return {ep:1,map:16}; if(m>=30) return null; return {ep:1,map:m+1};
+    }
+    var back={1:4,2:6,3:7,4:3};
+    if(level.map===9) return {ep:level.ep,map:back[level.ep]||4};
+    if(level.map<8) return {ep:level.ep,map:level.map+1};
+    if(level.ep<4) return {ep:level.ep+1,map:1};
+    return null;
+  }
+  $('cheat').addEventListener('click',async function(){
+    if(cheating||!running){ if(!running) toast('Start a game first'); return; }
+    var n=nextLevel(); if(!n){ toast('This is the last level'); return; }
+    var code=level.doom2?('idclev'+(n.map<10?'0':'')+n.map):('idclev'+n.ep+n.map);
+    var label=level.doom2?('MAP'+(n.map<10?'0':'')+n.map):('E'+n.ep+'M'+n.map);
+    cheating=true; this.classList.add('on');
+    await TouchKit.typeText(code,60);
+    level.ep=n.ep; level.map=n.map; cheating=false; this.classList.remove('on');
+    toast('Level complete! Warping to '+label);
+  });
   var wpn=1; $('wpn').addEventListener('pointerdown',function(e){ e.preventDefault(); wpn=wpn%7+1; TouchKit.tap(String(wpn)); this.textContent='Wpn '+wpn; });
   canvas.addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','F1','F2','F3'].indexOf(e.key)>=0) e.preventDefault(); });
   document.addEventListener('visibilitychange',function(){ if(document.hidden&&doom&&running){ try{doom._M_SaveDefaults(); doom.flushSaves();}catch(e){} } });

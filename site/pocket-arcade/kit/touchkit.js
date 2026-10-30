@@ -12,6 +12,7 @@
     e: ['e', 'KeyE', 69], f: ['f', 'KeyF', 70], v: ['v', 'KeyV', 86], c: ['c', 'KeyC', 67],
     pgup: ['PageUp', 'PageUp', 33], pgdn: ['PageDown', 'PageDown', 34], end: ['End', 'End', 35],
     del: ['Delete', 'Delete', 46], backquote: ['`', 'Backquote', 192],
+    comma: [',', 'Comma', 188], period: ['.', 'Period', 190],
     f1: ['F1', 'F1', 112], f2: ['F2', 'F2', 113], f3: ['F3', 'F3', 114], f6: ['F6', 'F6', 117], f9: ['F9', 'F9', 120]
   };
   for (var i = 0; i <= 9; i++) KEYS[String(i)] = [String(i), 'Digit' + i, 48 + i];
@@ -42,6 +43,37 @@
   function release(name) { if (!held[name]) return; held[name] = false; fire('keyup', name); }
   function tap(name, ms) { press(name); setTimeout(function () { release(name); }, ms || 90); }
   function releaseAll() { Object.keys(held).forEach(release); }
+
+  /* Type text as real key presses (for cheat codes and console commands). */
+  function charKey(ch) {
+    var c = ch.toLowerCase();
+    if (/[a-z]/.test(c)) return [c, 'Key' + c.toUpperCase(), c.toUpperCase().charCodeAt(0), c.charCodeAt(0)];
+    if (/[0-9]/.test(c)) return [c, 'Digit' + c, c.charCodeAt(0), c.charCodeAt(0)];
+    if (c === ' ') return [' ', 'Space', 32, 32];
+    if (c === '_') return ['_', 'Minus', 189, 95];
+    return null;
+  }
+  function fireRaw(type, k) {
+    var ev;
+    try { ev = new KeyboardEvent(type, { key: k[0], code: k[1], bubbles: true, cancelable: true }); } catch (e) { return; }
+    try {
+      Object.defineProperty(ev, 'keyCode', { get: function () { return type === 'keypress' ? k[3] : k[2]; } });
+      Object.defineProperty(ev, 'which', { get: function () { return type === 'keypress' ? k[3] : k[2]; } });
+      Object.defineProperty(ev, 'charCode', { get: function () { return type === 'keypress' ? k[3] : 0; } });
+    } catch (e) {}
+    (target.dispatchEvent ? target : global).dispatchEvent(ev);
+  }
+  function typeText(text, gap) {
+    gap = gap || 70;
+    return text.split('').reduce(function (p, ch) {
+      return p.then(function () {
+        var k = charKey(ch); if (!k) return;
+        fireRaw('keydown', k); fireRaw('keypress', k);
+        return new Promise(function (r) { setTimeout(function () { fireRaw('keyup', k); setTimeout(r, gap); }, gap); });
+      });
+    }, Promise.resolve());
+  }
+  function tapAsync(name, ms) { return new Promise(function (r) { tap(name, ms || 90); setTimeout(r, (ms || 90) + 120); }); }
 
   /* Bind every [data-key] button inside root. data-key may list several keys ("ctrl shift").
      data-mode="tap" sends a short press; data-mode="toggle" latches. */
@@ -128,7 +160,7 @@
 
   global.TouchKit = {
     setTarget: function (t) { target = t || global; },
-    press: press, release: release, tap: tap, releaseAll: releaseAll,
+    press: press, release: release, tap: tap, releaseAll: releaseAll, typeText: typeText, tapAsync: tapAsync,
     bind: bind, stick: stick, lookpad: lookpad,
     isTouch: function () { return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in global; }
   };

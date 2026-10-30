@@ -13,7 +13,8 @@
   .files{display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12px}
   .files span{color:var(--muted)}
   .files b{color:#7fe0a0;font-weight:500}
-  .row{left:calc(110px + env(safe-area-inset-left,0px));right:auto}
+  .row{left:calc(110px + env(safe-area-inset-left,0px));right:auto;flex-wrap:wrap;max-width:calc(100% - 130px)}
+  .shell.playing .stage canvas{pointer-events:none}
   .btns{grid-template-columns:repeat(3,58px)}
   .btns button{width:58px;height:58px}
   .btns button.fire{grid-column:3;grid-row:1/span 2;width:58px;height:126px;border-radius:29px}
@@ -30,24 +31,34 @@
     <canvas id="canvas" tabindex="-1" aria-label="Quake II screen" oncontextmenu="event.preventDefault()"></canvas>
 
     <div class="pad" id="pad" hidden>
-      <div class="look" id="look" aria-label="Drag to look around"></div>
-      <div class="stick" id="stick" aria-label="Move"><div class="knob"></div></div>
       <div class="row">
         <button type="button" data-key="esc" data-mode="tap">Menu</button>
         <button type="button" data-key="up" data-mode="tap">▲</button>
         <button type="button" data-key="down" data-mode="tap">▼</button>
         <button type="button" data-key="enter" data-mode="tap">Enter</button>
         <button type="button" data-key="f1" data-mode="tap">Goals</button>
+        <button type="button" id="wpn">Weapon</button>
+        <button type="button" data-key="tab" data-mode="tap">Items</button>
+        <button type="button" class="cheat" id="cheat">Complete level</button>
+      </div>
+      <div class="arrows" aria-label="Move and turn">
+        <button type="button" data-key="a">⇤<small>STRAFE</small></button>
+        <button type="button" data-key="w">▲<small>GO</small></button>
+        <button type="button" data-key="d">⇥<small>STRAFE</small></button>
+        <button type="button" data-key="left">◀<small>TURN</small></button>
+        <button type="button" data-key="s">▼<small>BACK</small></button>
+        <button type="button" data-key="right">▶<small>TURN</small></button>
       </div>
       <div class="btns">
+        <button type="button" data-key="pgup">Look ▲</button>
         <button type="button" data-key="space">Jump</button>
-        <button type="button" id="wpn">Weapon</button>
         <button type="button" class="fire" data-key="ctrl">Fire</button>
+        <button type="button" data-key="pgdn">Look ▼</button>
         <button type="button" data-key="c">Duck</button>
-        <button type="button" data-key="tab" data-mode="tap">Items</button>
       </div>
       <span class="portrait-hint">Turn your phone sideways</span>
     </div>
+    <div class="toast" id="toast"></div>
 
     <div class="gate" id="gate">
       <div class="card">
@@ -62,7 +73,7 @@
         <div class="meter"><i id="meter"></i></div>
         <p class="small" id="dl">Use Wi-Fi for the first download.</p>
         <button class="bigbtn" id="play" type="button">▶ Play!</button>
-        <p class="small">Touch: left stick moves, drag the right side to look, then Fire, Jump, Duck and Weapon. Keyboard, mouse and controllers work as on PC.</p>
+        <p class="small">Touch: arrow buttons move and turn, Look ▲▼ aims up and down, then Fire, Jump and Duck. Menu, ▲, ▼ and Enter work the menus. Complete level skips to the next map. Keyboards and controllers work as on PC.</p>
         <pre class="log" id="log" hidden></pre>
         <p class="small">Engine: <a href="https://github.com/GMH-Code/Qwasm2" target="_blank" rel="noopener">Qwasm2</a> (GPL-2.0), build from <a href="https://github.com/EmilioNicolas/quake2-alfonso-x-1999" target="_blank" rel="noopener">this repo</a>. The demo is served as id Software’s unmodified <a href="../originals/q2-314-demo-x86.exe">q2-314-demo-x86.exe</a>.</p>
       </div>
@@ -123,7 +134,7 @@
 
   function viewport(){ var r=$('stage').getBoundingClientRect(); return {w:Math.max(320,Math.round(r.width)),h:Math.max(200,Math.round(r.height))}; }
 
-  var busy=false, menuShown=false;
+  var busy=false, menuShown=false, currentTitle=null, expectTitle=false;
   $('play').addEventListener('click',async function(){
     if(started||busy) return;
     var btn=this, choice=(document.querySelector('input[name=data]:checked')||{}).value||'demo';
@@ -142,8 +153,7 @@
     var vp=viewport(), hasFull=paks.some(function(p){return p.data.length===183997730});
     window.Module={
       canvas:canvas,
-      touchRelativeMouse: touch ? true : undefined,
-      print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); if(!menuShown&&/client_connect/.test(t)){ menuShown=true; setTimeout(function(){ TouchKit.tap('space',150); },1800); } },
+      print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); var tt=String(t).replace(/[\x00-\x1f]/g,'').trim(); if(/^-=+-$/.test(tt)) expectTitle=true; else if(expectTitle&&tt){ currentTitle=tt; expectTitle=false; } if(!menuShown&&/client_connect/.test(t)){ menuShown=true; setTimeout(function(){ TouchKit.tap('space',150); },1800); } },
       printErr:function(t){ write(t); },
       setStatus:function(t){ if(t) status.textContent=t; },
       hideConsole:function(){ canvas.style.display='block'; },
@@ -170,25 +180,76 @@
     setTimeout(function(){ status.textContent='Playing'; canvas.focus&&canvas.focus(); },1500);
   });
 
-  /* Touch: stick = WASD, right side = mouse look, buttons = keys. */
+  /* Touch: arrow buttons and action buttons send keys. */
   TouchKit.bind($('pad'));
-  TouchKit.stick($('stick'),{up:'w',down:'s',left:'a',right:'d'},0.3);
-  (function(){
-    var look=$('look'), id=null, lx=0, ly=0;
-    function move(dx,dy){
-      var ev;
-      try{ ev=new MouseEvent('mousemove',{bubbles:true,cancelable:true,clientX:lx,clientY:ly,movementX:dx,movementY:dy}); }catch(e){ return; }
-      try{ if(ev.movementX!==dx){ Object.defineProperty(ev,'movementX',{get:function(){return dx}}); Object.defineProperty(ev,'movementY',{get:function(){return dy}}); } }catch(e){}
-      canvas.dispatchEvent(ev);
-    }
-    look.addEventListener('pointerdown',function(e){ e.preventDefault(); id=e.pointerId; lx=e.clientX; ly=e.clientY; try{look.setPointerCapture(id);}catch(x){} });
-    look.addEventListener('pointermove',function(e){ if(e.pointerId!==id) return; var dx=(e.clientX-lx)*2.2, dy=(e.clientY-ly)*2.2; lx=e.clientX; ly=e.clientY; move(Math.round(dx),Math.round(dy)); });
-    function end(e){ if(e.pointerId===id) id=null; }
-    look.addEventListener('pointerup',end); look.addEventListener('pointercancel',end);
-  })();
+  $('pad').addEventListener('touchstart',function(e){ if(e.target===this) e.preventDefault(); },{passive:false});
   $('wpn').addEventListener('pointerdown',function(e){
     e.preventDefault(); this.classList.add('on'); var b=this; setTimeout(function(){b.classList.remove('on')},120);
     try{ canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:100,deltaMode:0})); }catch(x){}
+  });
+  /* Cheat: complete level. Reads the current map's exit (target_changelevel) from the loaded
+     pak files and loads that map through the game console. */
+  function toast(msg){ var t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(function(){t.classList.remove('show')},2600); }
+  function readBytes(path,pos,len){ var st=FS.open(path,'r'), buf=new Uint8Array(len); FS.read(st,buf,0,len,pos); FS.close(st); return buf; }
+  var pakDirCache=null;
+  function pakDirs(){
+    if(pakDirCache) return pakDirCache;
+    var dir; try{ dir=FS.readdir('/baseq2'); }catch(e){ return []; }
+    var paks=dir.filter(function(f){return /^pak\d+\.pak$/i.test(f)}).sort().reverse();   // later paks override earlier ones
+    pakDirCache=paks.map(function(f){
+      var path='/baseq2/'+f, h=new DataView(readBytes(path,0,12).buffer);
+      var dofs=h.getInt32(4,true), dlen=h.getInt32(8,true), d=readBytes(path,dofs,dlen), dv=new DataView(d.buffer), files={};
+      for(var o=0;o<dlen;o+=64){
+        var n=''; for(var k=0;k<56&&d[o+k];k++) n+=String.fromCharCode(d[o+k]);
+        files[n.toLowerCase()]={path:path,pos:dv.getInt32(o+56,true),len:dv.getInt32(o+60,true)};
+      }
+      return files;
+    });
+    return pakDirCache;
+  }
+  function pakEntry(name){ var ds=pakDirs(); for(var i=0;i<ds.length;i++) if(ds[i][name]) return ds[i][name]; return null; }
+  function mapEntities(map){
+    var e=pakEntry('maps/'+map+'.bsp'); if(!e) return '';
+    var hdr=new DataView(readBytes(e.path,e.pos,16).buffer);
+    return new TextDecoder('latin1').decode(readBytes(e.path,e.pos+hdr.getInt32(8,true),hdr.getInt32(12,true)));
+  }
+  var norm=function(x){ return String(x||'').replace(/\\n/g,' ').replace(/[\x00-\x1f]/g,'').replace(/\s+/g,' ').trim().toLowerCase(); };
+  function mapFromTitle(title){
+    var want=norm(title), names={};
+    pakDirs().forEach(function(d){ Object.keys(d).forEach(function(n){ var m=/^maps\/([^\/]+)\.bsp$/.exec(n); if(m) names[m[1]]=1; }); });
+    var list=Object.keys(names);
+    for(var i=0;i<list.length;i++){
+      var ent=mapEntities(list[i]), w=/"classname"\s+"worldspawn"/.test(ent)?ent.split('}')[0]:'';
+      var msg=/"message"\s+"([^"]*)"/.exec(w);
+      if(msg&&norm(msg[1])===want) return list[i];
+    }
+    return null;
+  }
+  function nextMapOf(map){
+    var found=[];
+    mapEntities(map).split('}').forEach(function(b){
+      if(!/"classname"\s+"target_changelevel"/.test(b)) return;
+      var m=/"map"\s+"([^"$]*)/.exec(b); if(!m) return;
+      var name=m[1].replace(/^\*/,'').toLowerCase();
+      if(name&&name!==map&&found.indexOf(name)<0&&pakEntry('maps/'+name+'.bsp')) found.push(name);
+    });
+    return found[0]||null;
+  }
+  var cheating=false;
+  $('cheat').addEventListener('click',async function(){
+    if(cheating) return;
+    if(!currentTitle){ toast('Start a game first'); return; }
+    var cur=null, next=null;
+    try{ cur=mapFromTitle(currentTitle); next=cur&&nextMapOf(cur); }catch(e){ write('cheat: '+e.message); }
+    if(!cur){ toast('Could not tell which level this is'); return; }
+    if(!next){ toast('This is the last level'); return; }
+    cheating=true; this.classList.add('on'); toast('Level complete! Loading '+next+'…');
+    try{
+      await TouchKit.tapAsync('backquote',120);
+      await TouchKit.typeText('map '+next,45);
+      await TouchKit.tapAsync('enter',120);
+      await TouchKit.tapAsync('backquote',120);
+    }finally{ cheating=false; this.classList.remove('on'); }
   });
   addEventListener('keydown',function(e){ if([' ','Tab','ArrowUp','ArrowDown','F1'].indexOf(e.key)>=0) e.preventDefault(); });
 })();
