@@ -118,9 +118,22 @@ footer{color:var(--muted);font-size:12px;max-width:70ch}
 
 /* in-site player */
 #player{position:fixed;inset:0;z-index:60;background:#0b0a10}
-#player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#0b0a10}
-#playerClose{position:absolute;z-index:2;right:calc(10px + env(safe-area-inset-right,0px));top:calc(10px + env(safe-area-inset-top,0px));opacity:.85}
-#player.own-bar #playerClose{display:none}
+#stageBox{position:absolute;inset:0;overflow:hidden;background:#0b0a10}
+#player iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:0;display:block;background:#0b0a10;transform-origin:0 0}
+#player.desk iframe{width:1280px;height:800px}
+#ptools{position:absolute;z-index:3;right:calc(10px + env(safe-area-inset-right,0px));top:calc(10px + env(safe-area-inset-top,0px));display:flex;gap:6px}
+.tbtn{height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:rgba(31,28,45,.88);color:var(--fg);font:500 12px var(--display);letter-spacing:.04em;cursor:pointer;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.tbtn[aria-pressed="true"]{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+.tbtn.close{width:34px;padding:0}
+#player.own-bar #ptools{display:none}
+#vkeys{position:absolute;z-index:3;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;
+  padding:10px max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));pointer-events:none}
+#vkeys>*{pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none}
+.dpad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,54px);gap:6px}
+.dpad .up{grid-column:2;grid-row:1}.dpad .left{grid-column:1;grid-row:2}.dpad .down{grid-column:2;grid-row:2}.dpad .right{grid-column:3;grid-row:2}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:60%}
+#vkeys button{min-width:54px;height:54px;padding:0 10px;border-radius:12px;border:1px solid rgba(165,159,189,.45);background:rgba(42,38,64,.72);color:var(--fg);font:600 13px var(--display);letter-spacing:.04em;cursor:pointer}
+#vkeys button.on{background:var(--amber);color:var(--amber-ink)}
 button.btn{font-family:var(--display)}
 @media (prefers-reduced-motion:reduce){.btn.play:active{transform:none}}
 </style>
@@ -157,7 +170,7 @@ button.btn{font-family:var(--display)}
         <div class="cab-body">
           <h3>Voxel Sandbox</h3>
           <div class="chips"><span class="chip touch">Touch pad</span><span class="chip">Build &amp; break</span><span class="chip">Auto-saves</span></div>
-          <p>An open-world block-building sandbox. Explore generated hills and forests, break blocks and place new ones from a hotbar of nine materials. Your world saves on this phone.</p>
+          <p>An open-world block-building sandbox with oceans you can swim in, snowy mountains, pine forests, glowing crystal veins and a full day and night sky. Break and place 13 kinds of blocks; your world saves on this phone.</p>
           <ol class="steps">
             <li>Tap <b>Play!</b>, then Tap to Play.</li>
             <li>Stick walks, drag anywhere to look.</li>
@@ -190,7 +203,7 @@ button.btn{font-family:var(--display)}
       <div class="cart">
         <div class="top"><h4>Voxel Sandbox</h4><span class="lic">MIT · three.js</span></div>
         <div class="chips"><span class="chip touch">Touch pad</span></div>
-        <p>Open-world block building: explore, break and place blocks, fly over the hills.</p>
+        <p>Open-world block building with oceans, mountains, glowing crystals and day and night.</p>
         <div class="actions"><button class="btn play" type="button" data-game="voxel">▶ Play!</button><a class="btn ghost" href="https://github.com/freaxnx01/game-voxel-sandbox" target="_blank" rel="noopener">GitHub</a></div>
       </div>
       <div class="cart">
@@ -245,8 +258,21 @@ button.btn{font-family:var(--display)}
 </div>
 
 <div id="player" hidden>
-  <button class="icon-btn" id="playerClose" type="button" aria-label="Back to the arcade">✕</button>
-  <iframe id="playerFrame" title="Game" allow="fullscreen; autoplay; gamepad; screen-wake-lock" allowfullscreen></iframe>
+  <div id="stageBox"><iframe id="playerFrame" title="Game" allow="fullscreen; autoplay; gamepad; screen-wake-lock" allowfullscreen></iframe></div>
+  <div id="ptools">
+    <button class="tbtn" id="keysBtn" type="button" aria-pressed="false">⌨ Keys</button>
+    <button class="tbtn" id="deskBtn" type="button" aria-pressed="false">🖥 Desktop</button>
+    <button class="tbtn close" id="playerClose" type="button" aria-label="Back to the arcade">✕</button>
+  </div>
+  <div id="vkeys" hidden>
+    <div class="dpad">
+      <button type="button" class="k up" data-k="up">▲</button>
+      <button type="button" class="k left" data-k="left">◀</button>
+      <button type="button" class="k down" data-k="down">▼</button>
+      <button type="button" class="k right" data-k="right">▶</button>
+    </div>
+    <div class="acts" id="vacts"></div>
+  </div>
 </div>
 
 <div id="game" hidden>
@@ -426,20 +452,70 @@ addEventListener('keydown',e=>{if(!running)return;const k=e.key;
 
 
 /* ---------- in-site player ---------- */
-const GAMES={quake2:'quake2/index.html',voxel:'games/voxel-sandbox/index.html',doom:'doom/index.html',hexgl:'games/hexgl/index.html',hextris:'games/hextris/index.html','2048':'games/2048/index.html',adarkroom:'games/adarkroom/index.html','clumsy-bird':'games/clumsy-bird/index.html'};
+const GAMES={quake2:'quake2/index.html',voxel:'games/voxel-sandbox/index.html',doom:'doom/index.html',hexgl:'games/hexgl/index.html',hextris:'games/hextris/index.html','2048':'games/2048/index.html',adarkroom:'games/adarkroom/index.html?ignorebrowser=true','clumsy-bird':'games/clumsy-bird/index.html'};
 const OWN_BAR={quake2:1,doom:1};
-const player=$('player'),frame=$('playerFrame');
+/* Keyboard commands each desktop game expects. dpad: arrow keys. acts: extra buttons [label,key,mode]. */
+const CONTROLS={
+  '2048':{dpad:true,acts:[]},
+  hextris:{dpad:true,acts:[['Start','enter','tap'],['Pause','p','tap'],['Speed','down','hold']]},
+  hexgl:{dpad:true,acts:[['◀ Brake','a','hold'],['Brake ▶','d','hold']]},
+  'clumsy-bird':{dpad:false,acts:[['Flap','space','tap'],['Enter','enter','tap']]},
+  adarkroom:{dpad:false,acts:[]},
+  voxel:{dpad:true,acts:[['Jump','space','hold'],['Fly','f','tap'],['Break','q','tap'],['Place','e','tap']]}
+};
+const DESK_DEFAULT={adarkroom:true};
+const VK={up:['ArrowUp','ArrowUp',38],down:['ArrowDown','ArrowDown',40],left:['ArrowLeft','ArrowLeft',37],right:['ArrowRight','ArrowRight',39],
+  space:[' ','Space',32],enter:['Enter','Enter',13],p:['p','KeyP',80],a:['a','KeyA',65],d:['d','KeyD',68],q:['q','KeyQ',81],e:['e','KeyE',69],f:['f','KeyF',70]};
+const player=$('player'),frame=$('playerFrame'),stageBox=$('stageBox'),vkeys=$('vkeys');
+let current=null;
+function sendKey(type,name){
+  const k=VK[name]; if(!k)return;
+  let w,d; try{w=frame.contentWindow;d=w.document;}catch(e){return;}
+  let ev; try{ev=new w.KeyboardEvent(type,{key:k[0],code:k[1],bubbles:true,cancelable:true});}catch(e){return;}
+  try{Object.defineProperty(ev,'keyCode',{get:()=>k[2]});Object.defineProperty(ev,'which',{get:()=>k[2]});Object.defineProperty(ev,'charCode',{get:()=>type==='keypress'?k[2]:0});}catch(e){}
+  const t=d.activeElement&&d.activeElement!==d.body?d.activeElement:(d.body||d);
+  t.dispatchEvent(ev);
+}
+function bindKey(btn,name,mode){
+  const down=e=>{e.preventDefault();btn.classList.add('on');sendKey('keydown',name);if(name==='space'||name==='enter')sendKey('keypress',name);if(mode==='tap')setTimeout(()=>{sendKey('keyup',name);btn.classList.remove('on');},90);};
+  const up=()=>{if(mode==='tap')return;if(!btn.classList.contains('on'))return;btn.classList.remove('on');sendKey('keyup',name);};
+  btn.addEventListener('pointerdown',down);['pointerup','pointercancel','pointerleave'].forEach(t=>btn.addEventListener(t,up));
+  btn.addEventListener('contextmenu',e=>e.preventDefault());
+}
+vkeys.querySelectorAll('.dpad [data-k]').forEach(b=>bindKey(b,b.dataset.k,'hold'));
+function setKeys(on){
+  const c=CONTROLS[current]||{dpad:true,acts:[['Space','space','hold'],['Enter','enter','tap']]};
+  vkeys.hidden=!on; $('keysBtn').setAttribute('aria-pressed',on);
+  vkeys.querySelector('.dpad').hidden=!c.dpad;
+  const acts=$('vacts'); acts.innerHTML='';
+  c.acts.forEach(([label,key,mode])=>{const b=document.createElement('button');b.type='button';b.textContent=label;bindKey(b,key,mode);acts.appendChild(b);});
+}
+function fitDesk(){
+  if(!player.classList.contains('desk')){frame.style.transform='';return;}
+  const r=stageBox.getBoundingClientRect(),sc=Math.min(r.width/1280,r.height/800);
+  frame.style.transform='translate('+Math.max(0,(r.width-1280*sc)/2)+'px,'+Math.max(0,(r.height-800*sc)/2)+'px) scale('+sc+')';
+}
+function setDesk(on){player.classList.toggle('desk',on);$('deskBtn').setAttribute('aria-pressed',on);fitDesk();}
+addEventListener('resize',fitDesk);
+frame.addEventListener('load',fitDesk);
+$('keysBtn').addEventListener('click',()=>setKeys(vkeys.hidden));
+$('deskBtn').addEventListener('click',()=>setDesk(!player.classList.contains('desk')));
+const touchDevice=matchMedia('(pointer: coarse)').matches||'ontouchstart' in window;
 function openGame(id){
   if(!GAMES[id])return;
   if(running)close();
+  current=id;
   player.classList.toggle('own-bar',!!OWN_BAR[id]);
+  setDesk(!!DESK_DEFAULT[id]);
+  setKeys(touchDevice&&!!CONTROLS[id]&&CONTROLS[id].acts.length+(CONTROLS[id].dpad?1:0)>0&&id!=='voxel'&&id!=='2048');
   frame.src=GAMES[id];player.hidden=false;document.documentElement.style.overflow='hidden';
+  requestAnimationFrame(fitDesk);
   if(location.hash!=='#'+id){try{history.replaceState(null,'','#'+id)}catch(e){location.hash=id}}
   setTimeout(()=>{try{frame.focus()}catch(e){}},300);
 }
 function closeGame(){
   if(player.hidden)return;
-  player.hidden=true;frame.src='about:blank';document.documentElement.style.overflow='';
+  player.hidden=true;vkeys.hidden=true;frame.src='about:blank';document.documentElement.style.overflow='';current=null;
   try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
 }
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));

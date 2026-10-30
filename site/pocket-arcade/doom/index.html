@@ -97,7 +97,7 @@
   createDoom({
     canvas:canvas, print:write, printErr:write, onAbort:fail,
     getPreloadedPackage:function(){ return new ArrayBuffer(0); },
-    onGameReady:function(){ status.textContent='Playing'; },
+    onGameReady:function(){ status.textContent='Playing'; setTimeout(function(){ TouchKit.tap('esc',120); },1200); },
     onExit:function(){ running=false; status.textContent='Game ended. Reload to play again.'; },
     storageStatus:function(m){ write(m); }
   }).then(function(m){
@@ -111,7 +111,7 @@
     }
     if(choice==='freedoom'){
       var fb=await ArcadeZip.download(['freedoom2.wad'],28787748,function(p){progress(p,'Downloading Freedoom… '+Math.round(p*100)+'%');});
-      return {path:'/freedoom2.wad', data:new Uint8Array(fb), args:['-warp','1','-skill','3']};
+      return {path:'/freedoom2.wad', data:new Uint8Array(fb), args:[]};
     }
     // Shareware: id's original archive holds a two-part self-extractor that contains DOOM1.WAD.
     var zip=await ArcadeZip.download(['../originals/doom19s.zip'],2450688,function(p){progress(p*0.6,'Downloading shareware DOOM… '+Math.round(p*100)+'%');});
@@ -119,7 +119,7 @@
     var a=await ArcadeZip.extract(zip,'DOOMS_19.1'), b=await ArcadeZip.extract(zip,'DOOMS_19.2');
     var sfx=new Uint8Array(a.length+b.length); sfx.set(a); sfx.set(b,a.length);
     var wad=await ArcadeZip.extract(sfx.buffer,'DOOM1.WAD',function(p){progress(0.7+p*0.3,'Unpacking DOOM1.WAD…');});
-    return {path:'/doom1.wad', data:wad, args:['-skill','3']};
+    return {path:'/doom1.wad', data:wad, args:[]};
   }
 
   play.addEventListener('click',async function(){

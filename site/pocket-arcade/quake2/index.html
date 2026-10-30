@@ -123,7 +123,7 @@
 
   function viewport(){ var r=$('stage').getBoundingClientRect(); return {w:Math.max(320,Math.round(r.width)),h:Math.max(200,Math.round(r.height))}; }
 
-  var busy=false;
+  var busy=false, menuShown=false;
   $('play').addEventListener('click',async function(){
     if(started||busy) return;
     var btn=this, choice=(document.querySelector('input[name=data]:checked')||{}).value||'demo';
@@ -143,7 +143,7 @@
     window.Module={
       canvas:canvas,
       touchRelativeMouse: touch ? true : undefined,
-      print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); },
+      print:function(t){ if(arguments.length>1) t=[].slice.call(arguments).join(' '); write(t); if(!menuShown&&/client_connect/.test(t)){ menuShown=true; setTimeout(function(){ TouchKit.tap('space',150); },1800); } },
       printErr:function(t){ write(t); },
       setStatus:function(t){ if(t) status.textContent=t; },
       hideConsole:function(){ canvas.style.display='block'; },
@@ -161,8 +161,7 @@
         '+set','vid_renderer','gles3',
         '+set','r_mode','-1','+set','r_customwidth',String(vp.w),'+set','r_customheight',String(vp.h),
         '+set','gl_msaa_samples','0','+set','gl_anisotropic','4',
-        '+set','freelook','1','+set','cl_run','1','+set','sensitivity','5','+set','crosshair','1',
-        '+set','skill','1','+map',hasFull?'base1':'demo1'
+        '+set','freelook','1','+set','cl_run','1','+set','sensitivity','5','+set','crosshair','1'
       ]
     };
     var s=document.createElement('script'); s.src='index.js';
